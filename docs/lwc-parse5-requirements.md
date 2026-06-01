@@ -21,6 +21,8 @@ No LWC package imports these parse5 monorepo sibling packages:
 - `parse5-htmlparser2-tree-adapter`
 - `parse5-plain-text-conversion-stream`
 
+Those sibling packages are present in this repository for parse5 ecosystem parity and upstream fixture coverage. They should not be described as LWC requirements unless a future LWC audit shows direct imports or package dependencies.
+
 ## Locked Versions
 
 The current `reference/lwc/yarn.lock` resolves:
@@ -29,7 +31,7 @@ The current `reference/lwc/yarn.lock` resolves:
 - `entities@8.0.0`
 - `@parse5/tools@0.7.0`
 
-## Must-Port Runtime Surface
+## Direct LWC Must-Port Runtime Surface
 
 For LWC template compiler compatibility, the wasm-backed `parse5` package must provide:
 
@@ -171,7 +173,7 @@ They parse generated server HTML and compare `serialize(parseFragment(html))` ag
 
 This is test-only in LWC, but it should be included in the compatibility target.
 
-## Out of Scope for LWC Milestone
+## Out of Scope for Direct LWC Usage
 
 These parse5 features are not required by direct LWC usage:
 

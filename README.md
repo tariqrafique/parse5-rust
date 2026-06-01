@@ -8,7 +8,14 @@ The core parser, tokenizer, serializer, and default tree adapter live in Rust un
 
 This repository is an active port, currently focused on compatibility with parse5 8.x and the API surface used by LWC's `@lwc/template-compiler`.
 
-Implemented package surfaces include:
+For LWC, the direct must-port JavaScript surface is:
+
+- `parse5`
+- `@parse5/tools`
+
+LWC does not import `parse5-parser-stream`, `parse5-sax-parser`, `parse5-html-rewriting-stream`, `parse5-plain-text-conversion-stream`, or `parse5-htmlparser2-tree-adapter`. Those sibling package surfaces are included for broader parse5 ecosystem parity and upstream fixture coverage, not because LWC requires them.
+
+Implemented package surfaces currently include:
 
 - `parse5`
 - `parse5-wasm`
@@ -101,7 +108,7 @@ cd reference/lwc
 corepack yarn vitest run packages/@lwc/template-compiler
 ```
 
-This check is intentionally downstream validation. Upstream parse5 fixture parity should guide port completeness.
+This check is intentionally downstream validation. Upstream parse5 fixture parity should guide port completeness. Passing this check does not imply LWC uses the sibling parse5 packages; the sibling packages are tested separately by this repo's own npm suite.
 
 ## Licensing
 

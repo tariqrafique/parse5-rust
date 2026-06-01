@@ -38,6 +38,8 @@ The first compatibility target is `parse5@8.0.1`, especially the API surface use
 - `sourceCodeLocationInfo`
 - `onParseError` with parse5-compatible error codes and locations
 
+LWC's direct parse5-related package surface is `parse5` plus `@parse5/tools`. Do not treat parse5 sibling packages such as `parse5-parser-stream`, `parse5-sax-parser`, or `parse5-html-rewriting-stream` as LWC requirements unless the LWC audit changes.
+
 Current LWC keeps `parse5` and `@parse5/tools` in `devDependencies` and bundles their relevant code into `@lwc/template-compiler/dist`. For final validation, rebuild or alias LWC source against the wasm-backed parse5 package rather than only swapping a runtime dependency in the published package.
 
 See `docs/lwc-parse5-requirements.md` for the detailed must-port API surface and LWC call sites.
