@@ -1,0 +1,19 @@
+{
+  "name": "parse5-sax-parser",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./parser-feedback-simulator": {
+      "types": "./src/parser-feedback-simulator.d.ts",
+      "default": "./src/parser-feedback-simulator.js"
+    }
+  },
+  "dependencies": {
+    "parse5": "0.1.0"
+  }
+}

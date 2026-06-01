@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/parse5",
+    "crates/parse5-wasm",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tariqrafique/parse5-rust"
+
+[workspace.dependencies]
+parse5 = { path = "crates/parse5" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"

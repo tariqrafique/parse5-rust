@@ -1,0 +1,16 @@
+{
+  "name": "parse5-html-rewriting-stream",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "dependencies": {
+    "parse5": "0.1.0",
+    "parse5-sax-parser": "0.1.0"
+  }
+}

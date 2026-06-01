@@ -1,0 +1,15 @@
+{
+  "name": "parse5-wasm",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "cd ../.. && cargo build --release --target wasm32-unknown-unknown -p parse5-wasm && wasm-bindgen target/wasm32-unknown-unknown/release/parse5_wasm.wasm --target bundler --out-dir packages/parse5-wasm/pkg"
+  }
+}

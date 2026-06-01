@@ -1,0 +1,24 @@
+{
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "setup:reference": "./scripts/setup-reference.sh",
+    "build:wasm": "npm --workspace parse5-wasm run build",
+    "test": "npm run test:wasm-runtime && npm run test:wasm-facade && npm run test:golden && npm run typecheck:wasm && npm run test:parser-stream && npm run test:sax-parser && npm run test:plain-text-conversion-stream && npm run test:html-rewriting-stream && npm run test:htmlparser2-tree-adapter && npm run test:parse5-tools && npm run test:fixtures",
+    "test:lwc-requirements": "node scripts/audit-lwc-parse5-usage.mjs",
+    "test:fixtures": "node scripts/compare-parse5-golden.mjs --check-fixtures-only",
+    "test:golden": "node scripts/compare-parse5-golden.mjs",
+    "test:htmlparser2-tree-adapter": "node scripts/test-htmlparser2-tree-adapter.mjs",
+    "test:html-rewriting-stream": "node scripts/test-html-rewriting-stream.mjs",
+    "test:parser-stream": "node scripts/test-parser-stream.mjs",
+    "test:parse5-tools": "node scripts/test-parse5-tools.mjs",
+    "test:plain-text-conversion-stream": "node scripts/test-plain-text-conversion-stream.mjs",
+    "test:sax-parser": "node scripts/test-sax-parser.mjs",
+    "test:wasm-facade": "node scripts/test-parse5-wasm-facade.mjs",
+    "test:wasm-runtime": "node scripts/test-parse5-wasm-runtime.mjs",
+    "typecheck:wasm": "npx --yes --package typescript@5.6.3 tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 scripts/typecheck-parse5-wasm.ts"
+  }
+}
