@@ -28,6 +28,8 @@ Implemented package surfaces currently include:
 
 ## Layout
 
+See [`docs/architecture.md`](docs/architecture.md) for how the layers fit together and for current performance numbers (`npm run bench:wasm`).
+
 - `crates/parse5` - core Rust parser, tokenizer, serializer, tree adapter, and upstream fixture tests.
 - `crates/parse5-wasm` - wasm-bindgen bindings over the Rust crate.
 - `packages/parse5` - parse5-compatible npm facade that initializes and re-exports the wasm-backed API.
