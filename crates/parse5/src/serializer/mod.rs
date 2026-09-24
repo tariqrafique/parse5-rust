@@ -1,9 +1,9 @@
-use crate::common::entities::{escape_attribute, escape_text};
+use crate::common::entities::{push_escaped_attribute, push_escaped_text};
 use crate::common::html::{
     has_unescaped_text, is_void_element, NS_HTML, NS_XLINK, NS_XML, NS_XMLNS,
 };
 use crate::common::token::Attribute;
-use crate::tree_adapters::default::{get_template_content, NodeData, NodeRef};
+use crate::tree_adapters::default::{get_template_content, Node, NodeData, NodeRef};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SerializerOptions {
@@ -18,208 +18,184 @@ impl Default for SerializerOptions {
     }
 }
 
+/// Serializes the children of `node` (the equivalent of `innerHTML`).
 pub fn serialize(node: &NodeRef, options: SerializerOptions) -> String {
-    if is_html_void_element_node(node) {
-        return String::new();
+    let mut serializer = Serializer::new(options);
+
+    if !is_html_void_element(&node.borrow()) {
+        serializer.push_child_nodes(node);
+        serializer.run();
     }
 
-    serialize_child_nodes(node, options)
+    serializer.html
 }
 
+/// Serializes `node` itself, including its children (the equivalent of
+/// `outerHTML`).
 pub fn serialize_outer(node: &NodeRef, options: SerializerOptions) -> String {
-    serialize_node(node, options)
+    let mut serializer = Serializer::new(options);
+
+    serializer.stack.push(Work::Node(node.clone()));
+    serializer.run();
+    serializer.html
 }
 
-fn serialize_child_nodes(node: &NodeRef, options: SerializerOptions) -> String {
-    let container = if is_html_template_node(node) {
-        get_template_content(node).unwrap_or_else(|| node.clone())
-    } else {
-        node.clone()
-    };
-    let children = container
-        .borrow()
-        .child_nodes()
-        .cloned()
-        .unwrap_or_default();
-
-    children
-        .iter()
-        .map(|child| serialize_node(child, options))
-        .collect()
+enum Work {
+    Node(NodeRef),
+    EndTag(NodeRef),
 }
 
-fn serialize_node(node: &NodeRef, options: SerializerOptions) -> String {
-    enum Snapshot {
-        Document,
-        DocumentFragment,
-        Element {
-            tag_name: String,
-            attrs: Vec<Attribute>,
-            namespace_uri: String,
-            child_nodes: Vec<NodeRef>,
-        },
-        Comment(String),
-        Text(String),
-        DocumentType {
-            name: String,
-        },
+/// Iterative serializer: an explicit work stack keeps deeply nested trees from
+/// overflowing the call stack, which is much smaller on wasm.
+struct Serializer {
+    html: String,
+    options: SerializerOptions,
+    stack: Vec<Work>,
+}
+
+impl Serializer {
+    fn new(options: SerializerOptions) -> Self {
+        Self {
+            html: String::new(),
+            options,
+            stack: Vec::new(),
+        }
     }
 
-    let snapshot = {
+    fn run(&mut self) {
+        while let Some(work) = self.stack.pop() {
+            match work {
+                Work::Node(node) => self.serialize_node(&node),
+                Work::EndTag(node) => {
+                    if let Some(tag_name) = node.borrow().tag_name() {
+                        self.html.push_str("</");
+                        self.html.push_str(tag_name);
+                        self.html.push('>');
+                    }
+                }
+            }
+        }
+    }
+
+    /// Schedules the children of `node` (or of its template content) so that
+    /// they are serialized next, in document order.
+    fn push_child_nodes(&mut self, node: &NodeRef) {
+        let template_content = if is_html_template(&node.borrow()) {
+            get_template_content(node)
+        } else {
+            None
+        };
+        let container = template_content.as_ref().unwrap_or(node).borrow();
+
+        if let Some(child_nodes) = container.child_nodes() {
+            self.stack
+                .extend(child_nodes.iter().rev().cloned().map(Work::Node));
+        }
+    }
+
+    fn serialize_node(&mut self, node: &NodeRef) {
         let node_ref = node.borrow();
+
         match &node_ref.data {
-            NodeData::Document { .. } => Snapshot::Document,
-            NodeData::DocumentFragment { .. } => Snapshot::DocumentFragment,
+            NodeData::Document { .. } | NodeData::DocumentFragment { .. } => {
+                drop(node_ref);
+                self.push_child_nodes(node);
+            }
             NodeData::Element {
                 tag_name,
                 attrs,
                 namespace_uri,
-                child_nodes,
                 ..
-            } => Snapshot::Element {
-                tag_name: tag_name.clone(),
-                attrs: attrs.clone(),
-                namespace_uri: namespace_uri.clone(),
-                child_nodes: child_nodes.clone(),
-            },
-            NodeData::Comment { data } => Snapshot::Comment(data.clone()),
-            NodeData::Text { value } => Snapshot::Text(value.clone()),
-            NodeData::DocumentType {
-                name,
-                public_id: _,
-                system_id: _,
-            } => Snapshot::DocumentType { name: name.clone() },
-        }
-    };
+            } => {
+                self.html.push('<');
+                self.html.push_str(tag_name);
+                self.serialize_attrs(attrs);
+                self.html.push('>');
 
-    match snapshot {
-        Snapshot::Document | Snapshot::DocumentFragment => serialize_child_nodes(node, options),
-        Snapshot::Element {
-            tag_name,
-            attrs,
-            namespace_uri,
-            child_nodes,
-        } => {
-            let mut html = String::new();
-            html.push('<');
-            html.push_str(&tag_name);
-            html.push_str(&serialize_attrs(&attrs));
-            html.push('>');
+                if namespace_uri == NS_HTML && is_void_element(tag_name) {
+                    return;
+                }
 
-            if namespace_uri == NS_HTML && is_void_element(&tag_name) {
-                return html;
+                drop(node_ref);
+                self.stack.push(Work::EndTag(node.clone()));
+                self.push_child_nodes(node);
             }
-
-            let content_root = if namespace_uri == NS_HTML && tag_name == "template" {
-                get_template_content(node)
-            } else {
-                None
-            };
-
-            if let Some(content_root) = content_root {
-                html.push_str(&serialize_child_nodes(&content_root, options));
-            } else {
-                for child in child_nodes {
-                    html.push_str(&serialize_node(&child, options));
+            NodeData::Comment { data } => {
+                self.html.push_str("<!--");
+                self.html.push_str(data);
+                self.html.push_str("-->");
+            }
+            NodeData::Text { value } => {
+                if has_unescaped_text_parent(&node_ref, self.options.scripting_enabled) {
+                    self.html.push_str(value);
+                } else {
+                    push_escaped_text(&mut self.html, value);
                 }
             }
-
-            html.push_str("</");
-            html.push_str(&tag_name);
-            html.push('>');
-            html
-        }
-        Snapshot::Comment(data) => format!("<!--{data}-->"),
-        Snapshot::Text(value) => {
-            if has_unescaped_text_parent(node, options.scripting_enabled) {
-                value
-            } else {
-                escape_text(&value)
+            NodeData::DocumentType { name, .. } => {
+                self.html.push_str("<!DOCTYPE ");
+                self.html.push_str(name);
+                self.html.push('>');
             }
         }
-        Snapshot::DocumentType { name } => serialize_doctype(&name),
+    }
+
+    fn serialize_attrs(&mut self, attrs: &[Attribute]) {
+        let html = &mut self.html;
+
+        for attr in attrs {
+            html.push(' ');
+
+            match attr.namespace.as_deref() {
+                Some(NS_XML) => {
+                    html.push_str("xml:");
+                    html.push_str(&attr.name);
+                }
+                Some(NS_XMLNS) => {
+                    if attr.name != "xmlns" {
+                        html.push_str("xmlns:");
+                    }
+                    html.push_str(&attr.name);
+                }
+                Some(NS_XLINK) => {
+                    html.push_str("xlink:");
+                    html.push_str(&attr.name);
+                }
+                Some(_) => {
+                    if let Some(prefix) = &attr.prefix {
+                        html.push_str(prefix);
+                        html.push(':');
+                    }
+                    html.push_str(&attr.name);
+                }
+                None => html.push_str(&attr.name),
+            }
+
+            html.push_str("=\"");
+            push_escaped_attribute(html, &attr.value);
+            html.push('"');
+        }
     }
 }
 
-fn serialize_attrs(attrs: &[Attribute]) -> String {
-    let mut html = String::new();
-
-    for attr in attrs {
-        html.push(' ');
-
-        match attr.namespace.as_deref() {
-            Some(NS_XML) => {
-                html.push_str("xml:");
-                html.push_str(&attr.name);
-            }
-            Some(NS_XMLNS) => {
-                if attr.name != "xmlns" {
-                    html.push_str("xmlns:");
-                }
-                html.push_str(&attr.name);
-            }
-            Some(NS_XLINK) => {
-                html.push_str("xlink:");
-                html.push_str(&attr.name);
-            }
-            Some(_) => {
-                if let Some(prefix) = &attr.prefix {
-                    html.push_str(prefix);
-                    html.push(':');
-                }
-                html.push_str(&attr.name);
-            }
-            None => html.push_str(&attr.name),
-        }
-
-        html.push_str("=\"");
-        html.push_str(&escape_attribute(&attr.value));
-        html.push('"');
-    }
-
-    html
+fn is_html_void_element(node: &Node) -> bool {
+    node.namespace_uri() == Some(NS_HTML) && node.tag_name().is_some_and(is_void_element)
 }
 
-fn serialize_doctype(name: &str) -> String {
-    format!("<!DOCTYPE {name}>")
+fn is_html_template(node: &Node) -> bool {
+    node.namespace_uri() == Some(NS_HTML) && node.tag_name() == Some("template")
 }
 
-fn is_html_void_element_node(node: &NodeRef) -> bool {
-    matches!(
-        &node.borrow().data,
-        NodeData::Element {
-            tag_name,
-            namespace_uri,
-            ..
-        } if namespace_uri == NS_HTML && is_void_element(tag_name)
-    )
-}
-
-fn is_html_template_node(node: &NodeRef) -> bool {
-    matches!(
-        &node.borrow().data,
-        NodeData::Element {
-            tag_name,
-            namespace_uri,
-            ..
-        } if namespace_uri == NS_HTML && tag_name == "template"
-    )
-}
-
-fn has_unescaped_text_parent(node: &NodeRef, scripting_enabled: bool) -> bool {
-    let Some(parent) = node.borrow().parent() else {
+fn has_unescaped_text_parent(node: &Node, scripting_enabled: bool) -> bool {
+    let Some(parent) = node.parent() else {
         return false;
     };
-
     let parent = parent.borrow();
-    matches!(
-        &parent.data,
-        NodeData::Element {
-            tag_name,
-            namespace_uri,
-            ..
-        } if namespace_uri == NS_HTML && has_unescaped_text(tag_name, scripting_enabled)
-    )
+
+    parent.namespace_uri() == Some(NS_HTML)
+        && parent
+            .tag_name()
+            .is_some_and(|tag_name| has_unescaped_text(tag_name, scripting_enabled))
 }
 
 #[cfg(test)]

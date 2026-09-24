@@ -85,7 +85,7 @@ enum ErrorAssertion {
 fn run_tree_construction_fixture(
     path: &Path,
     error_assertion: ErrorAssertion,
-    skip_upstream_expected_failures: bool,
+    check_upstream_expected_failures: bool,
 ) {
     let fixture = fs::read_to_string(path).expect("tree-construction fixture is readable");
     let fixture_name = path
@@ -94,9 +94,8 @@ fn run_tree_construction_fixture(
         .expect("fixture has a UTF-8 file name");
 
     for (idx, test) in parse_dat_file(&fixture).into_iter().enumerate() {
-        if skip_upstream_expected_failures && is_upstream_expected_failure(fixture_name, idx) {
-            continue;
-        }
+        let expect_failure =
+            check_upstream_expected_failures && is_upstream_expected_failure(fixture_name, idx);
 
         let options = ParserOptions {
             scripting_enabled: test.scripting_enabled,
@@ -117,6 +116,20 @@ fn run_tree_construction_fixture(
 
         actual_errors.sort();
         expected_errors.sort();
+
+        if expect_failure {
+            // Upstream parse5 asserts that these cases do *not* match html5lib;
+            // mirror that so a behavioural change here is noticed.
+            assert!(
+                actual != test.expected
+                    || (matches!(error_assertion, ErrorAssertion::Compare)
+                        && actual_errors != expected_errors),
+                "{fixture_name}: case {idx} starting at line {} unexpectedly matches html5lib, \
+                 but upstream parse5 expects it to fail",
+                test.line_number
+            );
+            continue;
+        }
 
         assert_eq!(
             actual, test.expected,

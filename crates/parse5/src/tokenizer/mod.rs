@@ -4,6 +4,10 @@
 //! This module mirrors its state names and low-level helpers before the full
 //! state machine is wired into `Tokenizer`.
 
+use crate::common::entities::{
+    is_proper_prefix_of_named_character_reference, longest_named_character_reference_prefix,
+    max_named_character_reference_len,
+};
 use crate::common::error_codes::{ErrorCode, ParserError};
 use crate::common::html::{get_tag_id, TagId};
 use crate::common::token::{
@@ -12,7 +16,7 @@ use crate::common::token::{
 };
 use crate::common::unicode::{
     code_points as cp, is_control_code_point, is_surrogate, is_undefined_code_point,
-    sequences as seq, REPLACEMENT_CHARACTER,
+    sequences as seq, REPLACEMENT_CHARACTER, REPLACEMENT_CHARACTER_STR,
 };
 use preprocessor::Preprocessor;
 use std::collections::BTreeMap;
@@ -683,18 +687,18 @@ impl Tokenizer {
         } else {
             TokenType::Character
         };
-        let value = code_point_to_string(code_point);
-        let raw_value = code_point_to_utf16(code_point);
+        let mut value_buf = [0u8; 4];
+        let value = code_point_to_char(code_point).map_or("", |ch| ch.encode_utf8(&mut value_buf));
+        let mut raw_buf = [0u16; 2];
+        let raw_value = code_point_to_utf16(code_point, &mut raw_buf);
 
-        self.append_char_to_current_character_token(token_type, &value, &raw_value);
+        self.append_char_to_current_character_token(token_type, value, raw_value);
     }
 
     fn emit_chars(&mut self, value: &str) {
-        self.append_char_to_current_character_token(
-            TokenType::Character,
-            value,
-            &value.encode_utf16().collect::<Vec<_>>(),
-        );
+        let raw_value = value.encode_utf16().collect::<Vec<_>>();
+
+        self.append_char_to_current_character_token(TokenType::Character, value, &raw_value);
     }
 
     fn emit_character_reference(&mut self, decoded: &str, in_attribute: bool) {
@@ -754,11 +758,7 @@ impl Tokenizer {
             return numeric_character_reference_needs_more_input(&remaining[1..]);
         }
 
-        ::entities::ENTITIES.iter().any(|entry| {
-            let entity: Vec<u16> = entry.entity.encode_utf16().collect();
-
-            remaining.len() < entity.len() && entity.starts_with(remaining)
-        })
+        is_proper_prefix_of_named_character_reference(remaining)
     }
 
     fn hibernate_at_current_character_reference(&mut self) {
@@ -769,19 +769,14 @@ impl Tokenizer {
     }
 
     fn try_consume_named_character_reference(&mut self, in_attribute: bool) -> bool {
-        let mut best_match: Option<(&'static str, &'static str)> = None;
+        let best_match = longest_named_character_reference_prefix(
+            self.preprocessor.remaining_from_current_pos(),
+        );
 
-        for entry in ::entities::ENTITIES.iter() {
-            if self.preprocessor.starts_with(entry.entity, true) {
-                let replace = best_match
-                    .map(|(entity, _)| entry.entity.len() > entity.len())
-                    .unwrap_or(true);
-
-                if replace {
-                    best_match = Some((entry.entity, entry.characters));
-                }
-            }
-        }
+        // Matching against every entity used to probe past the end of the
+        // buffer for longer names; keep that end-of-chunk signal for streaming.
+        self.preprocessor
+            .mark_end_of_chunk_if_shorter_than(max_named_character_reference_len());
 
         let Some((entity, characters)) = best_match else {
             return false;
@@ -1069,7 +1064,7 @@ impl Tokenizer {
             cp::LESS_THAN_SIGN => self.state = State::RcDataLessThanSign,
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => self.emit_eof_token(),
             _ => self.emit_code_point(code_point),
@@ -1081,7 +1076,7 @@ impl Tokenizer {
             cp::LESS_THAN_SIGN => self.state = State::RawTextLessThanSign,
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => self.emit_eof_token(),
             _ => self.emit_code_point(code_point),
@@ -1093,7 +1088,7 @@ impl Tokenizer {
             cp::LESS_THAN_SIGN => self.state = State::ScriptDataLessThanSign,
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => self.emit_eof_token(),
             _ => self.emit_code_point(code_point),
@@ -1104,7 +1099,7 @@ impl Tokenizer {
         match code_point {
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => self.emit_eof_token(),
             _ => self.emit_code_point(code_point),
@@ -1195,7 +1190,7 @@ impl Tokenizer {
                 };
                 self.tag_token_mut()
                     .tag_name
-                    .push_str(&code_point_to_string(code_point));
+                    .extend(code_point_to_char(code_point));
             }
         }
     }
@@ -1321,7 +1316,7 @@ impl Tokenizer {
             cp::LESS_THAN_SIGN => self.state = State::ScriptDataEscapedLessThanSign,
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1341,7 +1336,7 @@ impl Tokenizer {
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
                 self.state = State::ScriptDataEscaped;
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1365,7 +1360,7 @@ impl Tokenizer {
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
                 self.state = State::ScriptDataEscaped;
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1443,7 +1438,7 @@ impl Tokenizer {
             }
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1466,7 +1461,7 @@ impl Tokenizer {
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
                 self.state = State::ScriptDataDoubleEscaped;
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1493,7 +1488,7 @@ impl Tokenizer {
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
                 self.state = State::ScriptDataDoubleEscaped;
-                self.emit_chars(&REPLACEMENT_CHARACTER.to_string());
+                self.emit_chars(REPLACEMENT_CHARACTER_STR);
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
@@ -1614,7 +1609,7 @@ impl Tokenizer {
                 self.err(ErrorCode::UnexpectedCharacterInAttributeName);
                 self.current_attr
                     .name
-                    .push_str(&code_point_to_string(code_point));
+                    .extend(code_point_to_char(code_point));
             }
             cp::NULL => {
                 self.err(ErrorCode::UnexpectedNullCharacter);
@@ -1628,7 +1623,7 @@ impl Tokenizer {
                 };
                 self.current_attr
                     .name
-                    .push_str(&code_point_to_string(code_point));
+                    .extend(code_point_to_char(code_point));
             }
         }
     }
@@ -1686,7 +1681,7 @@ impl Tokenizer {
             _ => self
                 .current_attr
                 .value
-                .push_str(&code_point_to_string(code_point)),
+                .extend(code_point_to_char(code_point)),
         }
     }
 
@@ -1705,7 +1700,7 @@ impl Tokenizer {
             _ => self
                 .current_attr
                 .value
-                .push_str(&code_point_to_string(code_point)),
+                .extend(code_point_to_char(code_point)),
         }
     }
 
@@ -1733,7 +1728,7 @@ impl Tokenizer {
                 self.err(ErrorCode::UnexpectedCharacterInUnquotedAttributeValue);
                 self.current_attr
                     .value
-                    .push_str(&code_point_to_string(code_point));
+                    .extend(code_point_to_char(code_point));
             }
             cp::EOF => {
                 self.err(ErrorCode::EofInTag);
@@ -1742,7 +1737,7 @@ impl Tokenizer {
             _ => self
                 .current_attr
                 .value
-                .push_str(&code_point_to_string(code_point)),
+                .extend(code_point_to_char(code_point)),
         }
     }
 
@@ -1810,7 +1805,7 @@ impl Tokenizer {
             _ => self
                 .comment_token_mut()
                 .data
-                .push_str(&code_point_to_string(code_point)),
+                .extend(code_point_to_char(code_point)),
         }
     }
 
@@ -1893,7 +1888,7 @@ impl Tokenizer {
             _ => self
                 .comment_token_mut()
                 .data
-                .push_str(&code_point_to_string(code_point)),
+                .extend(code_point_to_char(code_point)),
         }
     }
 
@@ -2084,7 +2079,7 @@ impl Tokenizer {
                     code_point
                 };
                 self.current_doctype_name_mut()
-                    .push_str(&code_point_to_string(code_point));
+                    .extend(code_point_to_char(code_point));
             }
         }
     }
@@ -2405,10 +2400,10 @@ impl Tokenizer {
             _ => {
                 if is_public {
                     self.current_doctype_public_id_mut()
-                        .push_str(&code_point_to_string(code_point));
+                        .extend(code_point_to_char(code_point));
                 } else {
                     self.current_doctype_system_id_mut()
-                        .push_str(&code_point_to_string(code_point));
+                        .extend(code_point_to_char(code_point));
                 }
             }
         }
@@ -2484,23 +2479,27 @@ fn current_location_from(
     })
 }
 
-fn code_point_to_string(code_point: i32) -> String {
-    if code_point < 0 {
-        String::new()
-    } else {
-        char::from_u32(code_point as u32)
-            .unwrap_or(REPLACEMENT_CHARACTER)
-            .to_string()
-    }
+fn code_point_to_char(code_point: i32) -> Option<char> {
+    u32::try_from(code_point)
+        .ok()
+        .map(|code_point| char::from_u32(code_point).unwrap_or(REPLACEMENT_CHARACTER))
 }
 
-fn code_point_to_utf16(code_point: i32) -> Vec<u16> {
-    if code_point < 0 {
-        Vec::new()
-    } else if (0xd800..=0xdfff).contains(&code_point) {
-        vec![code_point as u16]
-    } else {
-        code_point_to_string(code_point).encode_utf16().collect()
+fn code_point_to_string(code_point: i32) -> String {
+    code_point_to_char(code_point)
+        .map(String::from)
+        .unwrap_or_default()
+}
+
+/// Encodes `code_point` as UTF-16 into `buf`, keeping lone surrogates as-is.
+fn code_point_to_utf16(code_point: i32, buf: &mut [u16; 2]) -> &[u16] {
+    match code_point {
+        ..0 => &[],
+        0xd800..=0xdfff => {
+            buf[0] = code_point as u16;
+            &buf[..1]
+        }
+        _ => code_point_to_char(code_point).map_or(&[][..], |ch| ch.encode_utf16(buf)),
     }
 }
 

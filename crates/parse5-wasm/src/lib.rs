@@ -1,13 +1,10 @@
-use parse5::common::html::{DocumentMode, NS_HTML};
 use parse5::common::token::{
-    Attribute, CharacterToken, CommentToken, DoctypeToken, ElementLocation, EofToken, Location,
+    Attribute, CharacterToken, CommentToken, DoctypeToken, EofToken, Location,
     LocationWithAttributes, TagToken, Token, TokenType,
 };
 use parse5::parser::{Parser as RustParser, ScriptEvent, StackEvent, StackEventKind};
 use parse5::tokenizer::{State, Tokenizer, TokenizerOptions};
-use parse5::tree_adapters::default::{
-    append_child, create_element, get_template_content, NodeData, NodeRef,
-};
+use parse5::tree_adapters::default::{append_child, create_element, NodeData, NodeRef};
 use parse5::{
     parse, parse_fragment, parse_fragment_with_context, parse_fragment_with_context_and_errors,
     parse_fragment_with_errors, parse_with_errors, ParserOptions, SerializerOptions,
@@ -16,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
+
+mod node_json;
+
+use node_json::NodeJson;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,14 +99,6 @@ fn fragment_context_node(descriptor: &FragmentContextDescriptor) -> NodeRef {
     element
 }
 
-fn document_mode_value(mode: DocumentMode) -> &'static str {
-    match mode {
-        DocumentMode::NoQuirks => "no-quirks",
-        DocumentMode::Quirks => "quirks",
-        DocumentMode::LimitedQuirks => "limited-quirks",
-    }
-}
-
 fn location_value(location: Location) -> Value {
     json!({
         "startLine": location.start_line,
@@ -139,243 +132,10 @@ fn location_with_attrs_value(location: LocationWithAttributes) -> Value {
     Value::Object(object)
 }
 
-fn start_tag_location_value(
-    location: Location,
-    attrs: &std::collections::BTreeMap<String, Location>,
-) -> Value {
-    let mut object = match location_value(location) {
-        Value::Object(object) => object,
-        _ => Map::new(),
-    };
-
-    if !attrs.is_empty() {
-        let attrs = attrs
-            .iter()
-            .map(|(name, location)| (name.clone(), location_value(*location)))
-            .collect();
-        object.insert("attrs".to_string(), Value::Object(attrs));
-    }
-
-    Value::Object(object)
-}
-
 fn maybe_location_with_attrs_value(location: Option<LocationWithAttributes>) -> Value {
     location
         .map(location_with_attrs_value)
         .unwrap_or(Value::Null)
-}
-
-fn element_location_value(location: ElementLocation) -> Value {
-    let mut object = match location_value(location.location) {
-        Value::Object(object) => object,
-        _ => Map::new(),
-    };
-
-    if !location.attrs.is_empty() {
-        let attrs = location
-            .attrs
-            .iter()
-            .map(|(name, location)| (name.clone(), location_value(*location)))
-            .collect();
-        object.insert("attrs".to_string(), Value::Object(attrs));
-    }
-
-    if let Some(start_tag) = location.start_tag {
-        object.insert(
-            "startTag".to_string(),
-            start_tag_location_value(start_tag, &location.attrs),
-        );
-    }
-
-    if let Some(end_tag) = location.end_tag {
-        object.insert("endTag".to_string(), location_value(end_tag));
-    }
-
-    Value::Object(object)
-}
-
-fn add_source_location(
-    object: &mut Map<String, Value>,
-    location: Option<ElementLocation>,
-    location_is_set: bool,
-) {
-    match location {
-        Some(location) => {
-            object.insert(
-                "sourceCodeLocation".to_string(),
-                element_location_value(location),
-            );
-        }
-        None if location_is_set => {
-            object.insert("sourceCodeLocation".to_string(), Value::Null);
-        }
-        None => {}
-    }
-}
-
-fn add_node_location(
-    object: &mut Map<String, Value>,
-    location: Option<ElementLocation>,
-    location_is_set: bool,
-) {
-    match location {
-        Some(location) => {
-            object.insert(
-                "sourceCodeLocation".to_string(),
-                location_value(location.location),
-            );
-        }
-        None if location_is_set => {
-            object.insert("sourceCodeLocation".to_string(), Value::Null);
-        }
-        None => {}
-    }
-}
-
-fn node_value(node: &NodeRef) -> Value {
-    let node_ref = node.borrow();
-    let source_code_location = node_ref.source_code_location();
-    let source_code_location_is_set = node_ref.source_code_location_is_set();
-
-    match &node_ref.data {
-        NodeData::Document { mode, child_nodes } => {
-            let children = child_nodes.clone();
-            let mode = *mode;
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!("#document"));
-            object.insert("mode".to_string(), json!(document_mode_value(mode)));
-            object.insert(
-                "childNodes".to_string(),
-                Value::Array(children.iter().map(node_value).collect()),
-            );
-            add_node_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-        NodeData::DocumentFragment { child_nodes } => {
-            let children = child_nodes.clone();
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!("#document-fragment"));
-            object.insert(
-                "childNodes".to_string(),
-                Value::Array(children.iter().map(node_value).collect()),
-            );
-            add_node_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-        NodeData::Element {
-            node_name,
-            tag_name,
-            attrs,
-            namespace_uri,
-            child_nodes,
-            template_content,
-        } => {
-            let node_name = node_name.clone();
-            let tag_name = tag_name.clone();
-            let attrs = attrs.clone();
-            let namespace_uri = namespace_uri.clone();
-            let children = child_nodes.clone();
-            let template_content = template_content.clone();
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!(node_name));
-            object.insert("tagName".to_string(), json!(tag_name));
-            object.insert("attrs".to_string(), json!(attrs));
-            let is_html_template = tag_name == "template" && namespace_uri == NS_HTML;
-            object.insert("namespaceURI".to_string(), json!(namespace_uri));
-            object.insert("parentNode".to_string(), Value::Null);
-            object.insert(
-                "childNodes".to_string(),
-                Value::Array(children.iter().map(node_value).collect()),
-            );
-
-            if is_html_template {
-                let content = template_content
-                    .or_else(|| get_template_content(node))
-                    .map(|content| node_value(&content))
-                    .unwrap_or_else(|| {
-                        json!({
-                            "nodeName": "#document-fragment",
-                            "childNodes": [],
-                        })
-                    });
-                object.insert("content".to_string(), content);
-            }
-
-            add_source_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-        NodeData::Comment { data } => {
-            let data = data.clone();
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!("#comment"));
-            object.insert("data".to_string(), json!(data));
-            object.insert("parentNode".to_string(), Value::Null);
-            add_node_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-        NodeData::Text { value } => {
-            let value = value.clone();
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!("#text"));
-            object.insert("value".to_string(), json!(value));
-            object.insert("parentNode".to_string(), Value::Null);
-            add_node_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-        NodeData::DocumentType {
-            name,
-            public_id,
-            system_id,
-        } => {
-            let name = name.clone();
-            let public_id = public_id.clone();
-            let system_id = system_id.clone();
-            drop(node_ref);
-
-            let mut object = Map::new();
-            object.insert("nodeName".to_string(), json!("#documentType"));
-            object.insert("name".to_string(), json!(name));
-            object.insert("publicId".to_string(), json!(public_id));
-            object.insert("systemId".to_string(), json!(system_id));
-            object.insert("parentNode".to_string(), Value::Null);
-            add_node_location(
-                &mut object,
-                source_code_location,
-                source_code_location_is_set,
-            );
-            Value::Object(object)
-        }
-    }
 }
 
 fn parser_error_value(error: parse5::ParserError) -> Value {
@@ -529,17 +289,27 @@ fn tokenizer_state_from_u8(value: u8) -> Option<State> {
     })
 }
 
-fn to_js_value(value: Value) -> Result<JsValue, JsValue> {
-    value
-        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-        .map_err(|err| JsValue::from_str(&format!("failed to convert parse5 value: {err}")))
+/// Hands a result to JS as a JSON string decoded by the engine's native
+/// `JSON.parse`, which is several times faster for large trees than building
+/// the objects property by property across the wasm boundary.
+fn to_js_value(value: &impl Serialize) -> Result<JsValue, JsValue> {
+    let json = serde_json::to_string(value)
+        .map_err(|err| JsValue::from_str(&format!("failed to convert parse5 value: {err}")))?;
+
+    js_sys::JSON::parse(&json)
 }
 
-fn parse_result_value(document: NodeRef, errors: Vec<parse5::ParserError>) -> Value {
-    json!({
-        "node": node_value(&document),
-        "errors": errors.into_iter().map(parser_error_value).collect::<Vec<_>>(),
-    })
+#[derive(Serialize)]
+struct ParseResult<'a> {
+    node: NodeJson<'a>,
+    errors: Vec<Value>,
+}
+
+fn parse_result_value(document: &NodeRef, errors: Vec<parse5::ParserError>) -> ParseResult<'_> {
+    ParseResult {
+        node: NodeJson(document),
+        errors: errors.into_iter().map(parser_error_value).collect(),
+    }
 }
 
 fn node_path(root: &NodeRef, node: &NodeRef) -> Option<Vec<Value>> {
@@ -707,7 +477,7 @@ impl WasmParser {
         let errors = std::mem::take(&mut self.parser.errors);
         let stack_events = std::mem::take(&mut self.parser.stack_events);
         let script_events = std::mem::take(&mut self.parser.script_events);
-        to_js_value(parser_write_result_value(
+        to_js_value(&parser_write_result_value(
             &self.parser.document,
             errors,
             stack_events,
@@ -716,13 +486,13 @@ impl WasmParser {
     }
 
     pub fn document(&self) -> Result<JsValue, JsValue> {
-        to_js_value(node_value(&self.parser.document))
+        to_js_value(&NodeJson(&self.parser.document))
     }
 
     #[wasm_bindgen(js_name = getFragment)]
     pub fn get_fragment(&mut self) -> Result<JsValue, JsValue> {
         let fragment = self.parser.get_fragment();
-        to_js_value(node_value(&fragment))
+        to_js_value(&NodeJson(&fragment))
     }
 
     pub fn stopped(&self) -> bool {
@@ -822,7 +592,7 @@ impl WasmTokenizer {
         let token = self.tokenizer.next_token().map(token_value);
         let errors = self.tokenizer.take_errors();
 
-        to_js_value(json!({
+        to_js_value(&json!({
             "token": token.unwrap_or(Value::Null),
             "errors": errors.into_iter().map(parser_error_value).collect::<Vec<_>>(),
         }))
@@ -836,32 +606,32 @@ impl WasmTokenizer {
         }
 
         let errors = self.tokenizer.take_errors();
-        to_js_value(tokenizer_result_value(tokens, errors))
+        to_js_value(&tokenizer_result_value(tokens, errors))
     }
 }
 
 #[wasm_bindgen(js_name = parse)]
 pub fn parse_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let document = parse(html, parser_options(options)?);
-    to_js_value(node_value(&document))
+    to_js_value(&NodeJson(&document))
 }
 
 #[wasm_bindgen(js_name = parseWithErrors)]
 pub fn parse_with_errors_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let output = parse_with_errors(html, parser_options(options)?);
-    to_js_value(parse_result_value(output.document, output.errors))
+    to_js_value(&parse_result_value(&output.document, output.errors))
 }
 
 #[wasm_bindgen(js_name = parseFragment)]
 pub fn parse_fragment_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let fragment = parse_fragment(html, parser_options(options)?);
-    to_js_value(node_value(&fragment))
+    to_js_value(&NodeJson(&fragment))
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithErrors)]
 pub fn parse_fragment_with_errors_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let output = parse_fragment_with_errors(html, parser_options(options)?);
-    to_js_value(parse_result_value(output.document, output.errors))
+    to_js_value(&parse_result_value(&output.document, output.errors))
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithContext)]
@@ -875,7 +645,7 @@ pub fn parse_fragment_with_context_js(
         html,
         parser_options(options)?,
     );
-    to_js_value(node_value(&fragment))
+    to_js_value(&NodeJson(&fragment))
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithContextAndErrors)]
@@ -889,7 +659,7 @@ pub fn parse_fragment_with_context_and_errors_js(
         html,
         parser_options(options)?,
     );
-    to_js_value(parse_result_value(output.document, output.errors))
+    to_js_value(&parse_result_value(&output.document, output.errors))
 }
 
 #[wasm_bindgen(js_name = parseFragmentAndSerialize)]
