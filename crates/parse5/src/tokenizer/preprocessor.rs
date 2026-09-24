@@ -12,7 +12,10 @@ const DEFAULT_BUFFER_WATERLINE: usize = 1 << 16;
 
 #[derive(Debug, Clone)]
 pub struct Preprocessor {
+    /// Input buffer. Code units before `html_start` were dropped as already
+    /// parsed and are only kept until compaction is worth the copy.
     html: Vec<u16>,
+    html_start: usize,
     pub pos: isize,
     last_gap_pos: isize,
     gap_stack: Vec<isize>,
@@ -32,6 +35,7 @@ impl Default for Preprocessor {
     fn default() -> Self {
         Self {
             html: Vec::new(),
+            html_start: 0,
             pos: -1,
             last_gap_pos: -2,
             gap_stack: Vec::new(),
@@ -124,8 +128,8 @@ impl Preprocessor {
     }
 
     fn process_surrogate(&mut self, cp: u16) -> i32 {
-        if self.pos != self.html.len() as isize - 1 {
-            let next_cp = self.html[self.pos as usize + 1];
+        if self.pos != self.buf().len() as isize - 1 {
+            let next_cp = self.buf()[self.pos as usize + 1];
 
             if is_surrogate_pair(next_cp) {
                 self.pos += 1;
@@ -150,7 +154,16 @@ impl Preprocessor {
         if self.will_drop_parsed_chunk() {
             let pos = self.pos as usize;
 
-            self.html = self.html[pos..].to_vec();
+            self.html_start += pos;
+
+            // Compact only once the dead prefix outweighs the live data, so
+            // repeated drops stay amortized O(1) instead of recopying the
+            // remaining input every time the waterline is crossed.
+            if self.html_start >= self.html.len() - self.html_start {
+                self.html.drain(..self.html_start);
+                self.html_start = 0;
+            }
+
             self.line_start_pos -= self.pos;
             self.dropped_buffer_size += pos;
             self.pos = 0;
@@ -172,7 +185,7 @@ impl Preprocessor {
     }
 
     pub fn insert_html_at_current_pos(&mut self, chunk: &str) {
-        let insertion_pos = (self.pos + 1).max(0) as usize;
+        let insertion_pos = self.html_start + (self.pos + 1).max(0) as usize;
         self.html
             .splice(insertion_pos..insertion_pos, chunk.encode_utf16());
         self.end_of_chunk_hit = false;
@@ -180,37 +193,55 @@ impl Preprocessor {
 
     pub fn remaining_from_current_pos(&self) -> &[u16] {
         let start = self.pos.max(0) as usize;
-        &self.html[start..]
+        &self.buf()[start..]
+    }
+
+    /// The live (not yet dropped) part of the input buffer.
+    fn buf(&self) -> &[u16] {
+        &self.html[self.html_start..]
     }
 
     pub fn starts_with(&mut self, pattern: &str, case_sensitive: bool) -> bool {
-        let pattern: Vec<u16> = pattern.encode_utf16().collect();
         let start = self.pos.max(0) as usize;
+        let pattern_len = pattern.encode_utf16().count();
 
-        if start + pattern.len() > self.html.len() {
+        if start + pattern_len > self.buf().len() {
             self.end_of_chunk_hit = !self.last_chunk_written;
             return false;
         }
 
+        let candidate = &self.buf()[start..start + pattern_len];
+
         if case_sensitive {
-            return self.html[start..].starts_with(&pattern);
+            return candidate.iter().copied().eq(pattern.encode_utf16());
         }
 
-        pattern
+        candidate
             .iter()
-            .enumerate()
-            .all(|(idx, expected)| (self.html[start + idx] | 0x20) == *expected)
+            .zip(pattern.encode_utf16())
+            .all(|(&actual, expected)| (actual | 0x20) == expected)
+    }
+
+    /// Flags the end of the chunk when fewer than `len` code units remain from
+    /// the current position, mirroring what a failed `starts_with` of that
+    /// length would do.
+    pub fn mark_end_of_chunk_if_shorter_than(&mut self, len: usize) {
+        let start = self.pos.max(0) as usize;
+
+        if start + len > self.buf().len() {
+            self.end_of_chunk_hit = !self.last_chunk_written;
+        }
     }
 
     pub fn peek(&mut self, offset: isize) -> i32 {
         let pos = self.pos + offset;
 
-        if pos < 0 || pos >= self.html.len() as isize {
+        if pos < 0 || pos >= self.buf().len() as isize {
             self.end_of_chunk_hit = !self.last_chunk_written;
             return EOF;
         }
 
-        let code = self.html[pos as usize] as i32;
+        let code = self.buf()[pos as usize] as i32;
 
         if code == CARRIAGE_RETURN {
             LINE_FEED
@@ -228,12 +259,12 @@ impl Preprocessor {
             self.line_start_pos = self.pos;
         }
 
-        if self.pos >= self.html.len() as isize {
+        if self.pos >= self.buf().len() as isize {
             self.end_of_chunk_hit = !self.last_chunk_written;
             return EOF;
         }
 
-        let mut cp = self.html[self.pos as usize] as i32;
+        let mut cp = self.buf()[self.pos as usize] as i32;
 
         if cp == CARRIAGE_RETURN {
             self.is_eol = true;

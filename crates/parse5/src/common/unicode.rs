@@ -1,4 +1,5 @@
 pub const REPLACEMENT_CHARACTER: char = '\u{fffd}';
+pub const REPLACEMENT_CHARACTER_STR: &str = "\u{fffd}";
 
 pub mod code_points {
     pub const EOF: i32 = -1;

@@ -1,5 +1,5 @@
 use crate::common::html::{TagId, NS_HTML, NS_MATHML, NS_SVG};
-use crate::tree_adapters::default::{get_template_content, NodeData, NodeRef};
+use crate::tree_adapters::default::{get_template_content, is_in_namespace, NodeRef};
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl OpenElementStack {
             && self
                 .current
                 .as_ref()
-                .is_some_and(|current| namespace_uri(current).as_deref() == Some(NS_HTML))
+                .is_some_and(|current| is_in_namespace(current, NS_HTML))
     }
 
     fn update_current_element(&mut self) {
@@ -135,9 +135,7 @@ impl OpenElementStack {
 
             target_idx = idx as isize;
 
-            if target_idx <= 0
-                || namespace_uri(&self.items[target_idx as usize]).as_deref() == Some(NS_HTML)
-            {
+            if target_idx <= 0 || is_in_namespace(&self.items[target_idx as usize], NS_HTML) {
                 break;
             }
         }
@@ -195,8 +193,7 @@ impl OpenElementStack {
         }
 
         (0..=self.stack_top as usize).rev().find(|&idx| {
-            tag_names(self.tag_ids[idx])
-                && namespace_uri(&self.items[idx]).as_deref() == Some(namespace)
+            tag_names(self.tag_ids[idx]) && is_in_namespace(&self.items[idx], namespace)
         })
     }
 
@@ -260,7 +257,7 @@ impl OpenElementStack {
         for idx in (0..=self.stack_top as usize).rev() {
             let tn = self.tag_ids[idx];
 
-            match namespace_uri(&self.items[idx]).as_deref() {
+            match self.items[idx].borrow().namespace_uri() {
                 Some(NS_HTML) => {
                     if tn == tag_id {
                         return true;
@@ -302,7 +299,7 @@ impl OpenElementStack {
         for idx in (0..=self.stack_top as usize).rev() {
             let tn = self.tag_ids[idx];
 
-            match namespace_uri(&self.items[idx]).as_deref() {
+            match self.items[idx].borrow().namespace_uri() {
                 Some(NS_HTML) => {
                     if is_numbered_header_tag(tn) {
                         return true;
@@ -326,7 +323,7 @@ impl OpenElementStack {
         }
 
         for idx in (0..=self.stack_top as usize).rev() {
-            if namespace_uri(&self.items[idx]).as_deref() != Some(NS_HTML) {
+            if !is_in_namespace(&self.items[idx], NS_HTML) {
                 continue;
             }
 
@@ -346,7 +343,7 @@ impl OpenElementStack {
         }
 
         for idx in (0..=self.stack_top as usize).rev() {
-            if namespace_uri(&self.items[idx]).as_deref() != Some(NS_HTML) {
+            if !is_in_namespace(&self.items[idx], NS_HTML) {
                 continue;
             }
 
@@ -366,7 +363,7 @@ impl OpenElementStack {
         }
 
         for idx in (0..=self.stack_top as usize).rev() {
-            if namespace_uri(&self.items[idx]).as_deref() != Some(NS_HTML) {
+            if !is_in_namespace(&self.items[idx], NS_HTML) {
                 continue;
             }
 
@@ -422,13 +419,6 @@ impl OpenElementStack {
 
         let end = before.min(self.stack_top + 1) as usize;
         (0..end).rev().find(|&idx| self.tag_ids[idx] == tag_id)
-    }
-}
-
-fn namespace_uri(node: &NodeRef) -> Option<String> {
-    match &node.borrow().data {
-        NodeData::Element { namespace_uri, .. } => Some(namespace_uri.clone()),
-        _ => None,
     }
 }
 

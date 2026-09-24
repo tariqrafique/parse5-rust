@@ -6,16 +6,16 @@ use crate::common::html::{
     NS_HTML, NS_MATHML, NS_SVG,
 };
 use crate::common::token::{
-    get_token_attr, Attribute, CharacterToken, CommentToken, DoctypeToken, ElementLocation,
-    EofToken, Location, LocationWithAttributes, TagToken, Token, TokenType,
+    get_token_attr, CharacterToken, CommentToken, DoctypeToken, ElementLocation, EofToken,
+    Location, LocationWithAttributes, TagToken, Token, TokenType,
 };
 use crate::parser::formatting_element_list::{Entry, FormattingElementList};
 use crate::parser::open_element_stack::OpenElementStack;
 use crate::tokenizer::{State as TokenizerState, Tokenizer, TokenizerOptions};
 use crate::tree_adapters::default::{
     append_child, create_comment_node, create_document, create_document_fragment, create_element,
-    create_text_node, detach_node, get_first_child, set_document_mode, set_document_type,
-    set_template_content, NodeData, NodeRef,
+    create_text_node, detach_node, get_first_child, is_in_namespace, set_document_mode,
+    set_document_type, set_template_content, NodeData, NodeRef,
 };
 
 pub mod formatting_element_list;
@@ -55,7 +55,7 @@ pub enum InsertionMode {
     AfterAfterFrameset,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParserOptions {
     pub scripting_enabled: bool,
     pub source_code_location_info: bool,
@@ -270,7 +270,7 @@ impl Parser {
             return;
         };
 
-        if namespace_uri(fragment_context).as_deref() != Some(NS_HTML) {
+        if !is_in_namespace(fragment_context, NS_HTML) {
             return;
         }
 
@@ -411,16 +411,25 @@ impl Parser {
             Token::Doctype(token) => self.on_doctype(token),
             Token::Tag(token) if token.token_type == TokenType::StartTag => {
                 if report_self_closing_error {
-                    self.current_token = Some(Token::Tag(token.clone()));
+                    self.remember_current_token(&token);
                 }
                 self.process_start_tag(token, report_self_closing_error);
             }
             Token::Tag(token) if token.token_type == TokenType::EndTag => {
-                self.current_token = Some(Token::Tag(token.clone()));
+                self.remember_current_token(&token);
                 self.process_end_tag(token);
             }
             Token::Eof(token) => self.on_eof(token),
             _ => {}
+        }
+    }
+
+    /// Records the tag token being processed. It is only consulted to compute
+    /// end locations of popped elements, so the copy is skipped when source
+    /// code location info is disabled.
+    fn remember_current_token(&mut self, token: &TagToken) {
+        if self.options.source_code_location_info {
+            self.current_token = Some(Token::Tag(token.clone()));
         }
     }
 
@@ -2474,7 +2483,7 @@ impl Parser {
         }
 
         let target = if element_tag_name(common_ancestor).as_deref() == Some(TAG_NAME_TEMPLATE)
-            && namespace_uri(common_ancestor).as_deref() == Some(NS_HTML)
+            && is_in_namespace(common_ancestor, NS_HTML)
         {
             crate::tree_adapters::default::get_template_content(common_ancestor)
                 .unwrap_or_else(|| common_ancestor.clone())
@@ -2766,8 +2775,7 @@ impl Parser {
             target_idx = idx as isize;
 
             if target_idx <= 0
-                || namespace_uri(&self.open_elements.items[target_idx as usize]).as_deref()
-                    == Some(NS_HTML)
+                || is_in_namespace(&self.open_elements.items[target_idx as usize], NS_HTML)
             {
                 break;
             }
@@ -2851,17 +2859,22 @@ impl Parser {
             .rev()
             .find(|&idx| {
                 tag_names(self.open_elements.tag_ids[idx])
-                    && namespace_uri(&self.open_elements.items[idx]).as_deref() == Some(NS_HTML)
+                    && is_in_namespace(&self.open_elements.items[idx], NS_HTML)
             })
             .map(|idx| idx as isize)
     }
 
     fn set_end_location_for_popped_element(&mut self, element: &NodeRef) {
-        let Some(current_token) = self.current_token.clone() else {
+        if !self.options.source_code_location_info {
+            return;
+        }
+
+        let Some(current_token) = self.current_token.take() else {
             return;
         };
 
         self.set_end_location_for_element_with_token(element, &current_token);
+        self.current_token = Some(current_token);
     }
 
     fn set_end_location_for_element_with_token(&mut self, element: &NodeRef, token: &Token) {
@@ -2942,7 +2955,7 @@ impl Parser {
 
         if token.tag_id == TagId::Svg
             && element_tag_name(&current).as_deref() == Some("annotation-xml")
-            && namespace_uri(&current).as_deref() == Some(NS_MATHML)
+            && is_in_namespace(&current, NS_MATHML)
         {
             return false;
         }
@@ -2990,7 +3003,7 @@ impl Parser {
         for idx in (1..=self.open_elements.stack_top.max(0) as usize).rev() {
             let element = self.open_elements.items[idx].clone();
 
-            if namespace_uri(&element).as_deref() == Some(NS_HTML) {
+            if is_in_namespace(&element, NS_HTML) {
                 self.end_tag_outside_foreign_content(token);
                 break;
             }
@@ -3010,7 +3023,7 @@ impl Parser {
         while let Some(current) = self.open_elements.current.clone() {
             let current_tag_id = self.open_elements.current_tag_id.unwrap_or(TagId::Unknown);
 
-            if namespace_uri(&current).as_deref() == Some(NS_HTML)
+            if is_in_namespace(&current, NS_HTML)
                 || self.is_integration_point(current_tag_id, &current, None)
             {
                 break;
@@ -3026,18 +3039,19 @@ impl Parser {
         element: &NodeRef,
         foreign_namespace: Option<&str>,
     ) -> bool {
+        let element = element.borrow();
+
         foreign_content::is_integration_point(
             tag_id,
-            namespace_uri(element).as_deref().unwrap_or(NS_HTML),
-            &attrs(element),
+            element.namespace_uri().unwrap_or(NS_HTML),
+            element.attrs().unwrap_or_default(),
             foreign_namespace,
         )
     }
 
     fn current_not_in_html(&self) -> bool {
         let current = self.current_node_and_tag_id_for_context().0;
-        !std::rc::Rc::ptr_eq(&current, &self.document)
-            && namespace_uri(&current).as_deref() != Some(NS_HTML)
+        !std::rc::Rc::ptr_eq(&current, &self.document) && !is_in_namespace(&current, NS_HTML)
     }
 
     fn document_mode(&self) -> DocumentMode {
@@ -3060,7 +3074,7 @@ impl Parser {
             let open_element = self.open_elements.items[idx].clone();
 
             match self.open_elements.tag_ids[idx] {
-                TagId::Template if namespace_uri(&open_element).as_deref() == Some(NS_HTML) => {
+                TagId::Template if is_in_namespace(&open_element, NS_HTML) => {
                     if let Some(content) =
                         crate::tree_adapters::default::get_template_content(&open_element)
                     {
@@ -3106,13 +3120,13 @@ impl Parser {
     }
 
     fn is_special_element(&self, element: &NodeRef, tag_id: TagId) -> bool {
-        is_special_element(namespace_uri(element).as_deref().unwrap_or(NS_HTML), tag_id)
+        is_special_element(element.borrow().namespace_uri().unwrap_or(NS_HTML), tag_id)
     }
 
     fn tokenizer_in_foreign_node(&self) -> bool {
         let (current, current_tag_id) = self.current_node_and_tag_id_for_context();
 
-        namespace_uri(&current).as_deref() != Some(NS_HTML)
+        !is_in_namespace(&current, NS_HTML)
             && !std::rc::Rc::ptr_eq(&current, &self.document)
             && !self.is_integration_point(current_tag_id, &current, None)
     }
@@ -3443,13 +3457,6 @@ fn namespace_uri(element: &NodeRef) -> Option<String> {
     }
 }
 
-fn attrs(element: &NodeRef) -> Vec<Attribute> {
-    match &element.borrow().data {
-        NodeData::Element { attrs, .. } => attrs.clone(),
-        _ => Vec::new(),
-    }
-}
-
 fn is_table_structure_tag(tag_id: TagId) -> bool {
     matches!(
         tag_id,
@@ -3570,7 +3577,7 @@ fn comment_data(node: &NodeRef) -> String {
 }
 
 #[cfg(test)]
-fn element_attr(node: &NodeRef, name: &str) -> Option<Attribute> {
+fn element_attr(node: &NodeRef, name: &str) -> Option<crate::common::token::Attribute> {
     match &node.borrow().data {
         NodeData::Element { attrs, .. } => attrs.iter().find(|attr| attr.name == name).cloned(),
         _ => panic!("expected element node"),

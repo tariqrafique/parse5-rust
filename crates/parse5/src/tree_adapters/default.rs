@@ -31,7 +31,6 @@ pub enum NodeData {
         child_nodes: Vec<NodeRef>,
     },
     Element {
-        node_name: String,
         tag_name: String,
         attrs: Vec<Attribute>,
         namespace_uri: String,
@@ -79,10 +78,8 @@ impl Node {
         namespace_uri: impl Into<String>,
         attrs: Vec<Attribute>,
     ) -> NodeRef {
-        let tag_name = tag_name.into();
         Self::new_ref(NodeData::Element {
-            node_name: tag_name.clone(),
-            tag_name,
+            tag_name: tag_name.into(),
             attrs,
             namespace_uri: namespace_uri.into(),
             child_nodes: Vec::new(),
@@ -120,7 +117,7 @@ impl Node {
         match &self.data {
             NodeData::Document { .. } => "#document",
             NodeData::DocumentFragment { .. } => "#document-fragment",
-            NodeData::Element { node_name, .. } => node_name,
+            NodeData::Element { tag_name, .. } => tag_name,
             NodeData::Comment { .. } => "#comment",
             NodeData::Text { .. } => "#text",
             NodeData::DocumentType { .. } => "#documentType",
@@ -133,6 +130,11 @@ impl Node {
 
     pub fn source_code_location(&self) -> Option<ElementLocation> {
         self.source_code_location.clone()
+    }
+
+    /// Borrowing variant of [`Node::source_code_location`].
+    pub fn source_code_location_ref(&self) -> Option<&ElementLocation> {
+        self.source_code_location.as_ref()
     }
 
     pub fn source_code_location_is_set(&self) -> bool {
@@ -172,6 +174,30 @@ impl Node {
         matches!(self.data, NodeData::DocumentType { .. })
     }
 
+    /// Namespace URI of an element node, borrowed; `None` for other node kinds.
+    pub fn namespace_uri(&self) -> Option<&str> {
+        match &self.data {
+            NodeData::Element { namespace_uri, .. } => Some(namespace_uri),
+            _ => None,
+        }
+    }
+
+    /// Tag name of an element node, borrowed; `None` for other node kinds.
+    pub fn tag_name(&self) -> Option<&str> {
+        match &self.data {
+            NodeData::Element { tag_name, .. } => Some(tag_name),
+            _ => None,
+        }
+    }
+
+    /// Attributes of an element node, borrowed; `None` for other node kinds.
+    pub fn attrs(&self) -> Option<&[Attribute]> {
+        match &self.data {
+            NodeData::Element { attrs, .. } => Some(attrs),
+            _ => None,
+        }
+    }
+
     pub fn child_nodes(&self) -> Option<&Vec<NodeRef>> {
         match &self.data {
             NodeData::Document { child_nodes, .. }
@@ -187,6 +213,49 @@ impl Node {
             | NodeData::DocumentFragment { child_nodes }
             | NodeData::Element { child_nodes, .. } => Some(child_nodes),
             _ => None,
+        }
+    }
+}
+
+impl Node {
+    /// Detaches and returns all owned descendants' roots: child nodes plus
+    /// template content.
+    fn take_owned_nodes(&mut self) -> Vec<NodeRef> {
+        match &mut self.data {
+            NodeData::Document { child_nodes, .. } | NodeData::DocumentFragment { child_nodes } => {
+                std::mem::take(child_nodes)
+            }
+            NodeData::Element {
+                child_nodes,
+                template_content,
+                ..
+            } => {
+                let mut owned = std::mem::take(child_nodes);
+                owned.extend(template_content.take());
+                owned
+            }
+            NodeData::Comment { .. } | NodeData::Text { .. } | NodeData::DocumentType { .. } => {
+                Vec::new()
+            }
+        }
+    }
+}
+
+impl Drop for Node {
+    /// Frees the subtree iteratively. The default recursive drop glue would
+    /// overflow the stack on deeply nested documents (e.g. 100k nested
+    /// `<div>`s), which the HTML parsing algorithm happily produces.
+    fn drop(&mut self) {
+        let mut pending = self.take_owned_nodes();
+
+        while let Some(node) = pending.pop() {
+            // Only nodes we hold the last strong reference to are freed here;
+            // shared nodes stay alive with their subtree intact. Emptying the
+            // node in place makes its own drop (at the end of this iteration)
+            // trivial.
+            if Rc::strong_count(&node) == 1 {
+                pending.append(&mut node.borrow_mut().take_owned_nodes());
+            }
         }
     }
 }
@@ -407,6 +476,11 @@ pub fn get_attr_list(element: &NodeRef) -> Vec<Attribute> {
         NodeData::Element { attrs, .. } => attrs.clone(),
         _ => panic!("get_attr_list target must be an element"),
     }
+}
+
+/// Returns `true` if `node` is an element in the namespace `namespace_uri`.
+pub fn is_in_namespace(node: &NodeRef, namespace_uri: &str) -> bool {
+    node.borrow().namespace_uri() == Some(namespace_uri)
 }
 
 pub fn get_tag_name(element: &NodeRef) -> String {
