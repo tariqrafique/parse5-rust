@@ -87,6 +87,7 @@ dependencies = [
 name = "parse5-wasm"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "parse5",
  "serde",
  "serde-wasm-bindgen",
