@@ -30,6 +30,8 @@ fn upstream_parser_location_info_fixtures_match_parse5() {
             .and_then(|name| name.to_str())
             .expect("fixture has a UTF-8 directory name");
         let lines = html.split('\n').collect::<Vec<_>>();
+        // Encode once: slicing by UTF-16 offset per assertion keeps this linear.
+        let html_utf16 = html.encode_utf16().collect::<Vec<_>>();
         let document = parse(
             &html,
             ParserOptions {
@@ -51,7 +53,7 @@ fn upstream_parser_location_info_fixtures_match_parse5() {
             assert_location(
                 &location.location,
                 &serialized_node,
-                &html,
+                &html_utf16,
                 &lines,
                 fixture_name,
                 &node_name,
@@ -61,7 +63,7 @@ fn upstream_parser_location_info_fixtures_match_parse5() {
                 assert_start_tag_location(
                     &location,
                     &serialized_node,
-                    &html,
+                    &html_utf16,
                     &lines,
                     fixture_name,
                     &node_name,
@@ -71,7 +73,7 @@ fn upstream_parser_location_info_fixtures_match_parse5() {
                     assert_end_tag_location(
                         end_tag,
                         &serialized_node,
-                        &html,
+                        &html_utf16,
                         &lines,
                         fixture_name,
                         &node_name,
@@ -119,7 +121,7 @@ fn upstream_parser_location_info_fixtures_match_parse5() {
                         assert_location(
                             attr_location,
                             &expected,
-                            &html,
+                            &html_utf16,
                             &lines,
                             fixture_name,
                             &node_name,
@@ -226,9 +228,10 @@ fn start_tag_location_is_available_when_end_tag_is_missing_like_upstream() {
     let p = child_at(&fragment, 0);
     let location = get_node_source_code_location(&p).expect("p has a location");
     let lines = [html];
+    let html_utf16 = html.encode_utf16().collect::<Vec<_>>();
 
-    assert_location(&location.location, html, html, &lines, "gh-181", "p");
-    assert_start_tag_location(&location, html, html, &lines, "gh-181", "p");
+    assert_location(&location.location, html, &html_utf16, &lines, "gh-181", "p");
+    assert_start_tag_location(&location, html, &html_utf16, &lines, "gh-181", "p");
     assert!(location.end_tag.is_none());
 }
 
@@ -258,20 +261,28 @@ fn escaped_script_text_location_matches_text_content_like_upstream() {
     let script_location = get_node_source_code_location(&script).expect("script has a location");
     let text_location = get_node_source_code_location(&text).expect("script text has a location");
     let lines = [html];
+    let html_utf16 = html.encode_utf16().collect::<Vec<_>>();
 
     assert_location(
         &script_location.location,
         html,
-        html,
+        &html_utf16,
         &lines,
         "gh-265",
         "script",
     );
-    assert_start_tag_location(&script_location, html, html, &lines, "gh-265", "script");
+    assert_start_tag_location(
+        &script_location,
+        html,
+        &html_utf16,
+        &lines,
+        "gh-265",
+        "script",
+    );
     assert_location(
         &text_location.location,
         &utf16_substring(html, 8, 15),
-        html,
+        &html_utf16,
         &lines,
         "gh-265",
         "#text",
@@ -381,7 +392,7 @@ fn enquote_doctype_id(id: &str) -> String {
 fn assert_start_tag_location(
     location: &parse5::ElementLocation,
     serialized_node: &str,
-    html: &str,
+    html: &[u16],
     lines: &[&str],
     fixture_name: &str,
     node_name: &str,
@@ -402,7 +413,7 @@ fn assert_start_tag_location(
 fn assert_end_tag_location(
     end_tag: &Location,
     serialized_node: &str,
-    html: &str,
+    html: &[u16],
     lines: &[&str],
     fixture_name: &str,
     node_name: &str,
@@ -421,13 +432,13 @@ fn assert_end_tag_location(
 fn assert_location(
     location: &Location,
     expected: &str,
-    html: &str,
+    html: &[u16],
     lines: &[&str],
     fixture_name: &str,
     node_name: &str,
 ) {
     let expected = remove_new_lines(expected);
-    let actual = remove_new_lines(&utf16_substring(
+    let actual = remove_new_lines(&utf16_slice(
         html,
         location.start_offset,
         location.end_offset,
@@ -482,6 +493,11 @@ fn utf16_substring(input: &str, start: usize, end: usize) -> String {
             .take(end.saturating_sub(start))
             .collect::<Vec<_>>(),
     )
+}
+
+fn utf16_slice(units: &[u16], start: usize, end: usize) -> String {
+    let end = end.min(units.len());
+    String::from_utf16_lossy(units.get(start..end).unwrap_or_default())
 }
 
 fn utf16_len(input: &str) -> usize {

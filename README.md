@@ -73,7 +73,7 @@ Run the Rust test suite:
 cargo test
 ```
 
-Run the self-contained npm package suite:
+Run the npm package suite (requires a built wasm package, see Build):
 
 ```sh
 npm test
@@ -85,7 +85,12 @@ Run lint checks:
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-These tests use checked-in fixtures under `fixtures/parse5/test/data`; they do not require a `reference/parse5` checkout.
+These tests use checked-in fixtures under `fixtures/parse5/test/data`. The one exception is `npm run test:wasm-runtime` (the first step of `npm test`), which compares the port's exports and output against a built upstream parse5 at `reference/parse5/packages/parse5/dist`. To prepare it for the `parse5@8.0.1` compatibility target:
+
+```sh
+git clone --depth 1 --branch v8.0.1 https://github.com/inikulin/parse5.git reference/parse5
+(cd reference/parse5 && npm ci --ignore-scripts && npx tsc --build packages/parse5)
+```
 
 ## Reference Checkouts
 
