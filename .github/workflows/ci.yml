@@ -1,4 +1,5 @@
 name: CI
+# Hosted runners are pinned to ubuntu-24.04. ubuntu-latest is moving to 26.04 through November 2026.
 
 on:
   pull_request:
