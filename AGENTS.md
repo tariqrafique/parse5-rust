@@ -8,7 +8,8 @@ Rust/wasm port of parse5. Compatibility target is `parse5@8.0.1`, especially `pa
 |---|---|---|
 | `cargo test` | Rust suite against `fixtures/` | ~3s |
 | `cargo test --test html5lib_tree_construction` | One integration suite | ~1s |
-| `cargo test --test attr_location_spans` | Attribute span cases | <1s |
+| `cargo test --test attr_location_spans quoted_last_gt` | One attribute-span case | <1s |
+| `HTML5LIB_FILTER=tests1.dat:42 cargo test --test html5lib_tree_construction` | One html5lib tree case (0-based index). Same variable works for tokenizer files (`test1.test:3`) | <1s |
 | `./scripts/check.sh` or `just check` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, reference guard | ~10s |
 | `./scripts/check-wasm.sh` or `just check-wasm` | wasm-bindgen version, `npm run build:wasm`, `npm test` | ~16s after the first wasm build |
 | `npm test` | Offline package suite. Needs a built wasm package. Does not need `reference/` | ~4s |
@@ -18,7 +19,7 @@ Rust/wasm port of parse5. Compatibility target is `parse5@8.0.1`, especially `pa
 
 ## Where to look
 
-- Upstream file map: the table in `docs/architecture.md` (`parser/mod.rs` ↔ `parser/index.ts`, and the rest).
+- Upstream file map: the table in `docs/architecture.md`. Insertion modes live under `crates/parse5/src/parser/modes/` and tokenizer states under `crates/parse5/src/tokenizer/states/`.
 - Do not read or grep `fixtures/` wholesale. It is about 7.8 MB. `namedEntities.test` is 1.1 MB and vendored twice (the copies are byte-identical; `npm run test:fixtures` checks that). Use `rg -g '!fixtures'`.
 - Offsets are UTF-16 code units everywhere (errors and `sourceCodeLocation`).
 - The parser does not use the `TreeAdapter` trait. Call the free functions in `tree_adapters::default`.
