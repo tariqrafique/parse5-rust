@@ -124,37 +124,30 @@ impl TokenizerMode {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_ascii_digit(cp: i32) -> bool {
     (cp::DIGIT_0..=cp::DIGIT_9).contains(&cp)
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_ascii_upper(cp: i32) -> bool {
     (cp::LATIN_CAPITAL_A..=cp::LATIN_CAPITAL_Z).contains(&cp)
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_ascii_lower(cp: i32) -> bool {
     (cp::LATIN_SMALL_A..=cp::LATIN_SMALL_Z).contains(&cp)
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_ascii_letter(cp: i32) -> bool {
     is_ascii_lower(cp) || is_ascii_upper(cp)
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_ascii_alpha_numeric(cp: i32) -> bool {
     is_ascii_letter(cp) || is_ascii_digit(cp)
 }
 
-#[allow(dead_code)]
 pub(crate) fn to_ascii_lower(cp: i32) -> i32 {
     cp + 0x20
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_whitespace(cp: i32) -> bool {
     matches!(
         cp,
@@ -162,12 +155,10 @@ pub(crate) fn is_whitespace(cp: i32) -> bool {
     )
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_script_data_double_escape_sequence_end(cp: i32) -> bool {
     is_whitespace(cp) || matches!(cp, cp::SOLIDUS | cp::GREATER_THAN_SIGN)
 }
 
-#[allow(dead_code)]
 pub(crate) fn get_error_for_numeric_character_reference(code: u32) -> Option<ErrorCode> {
     if code == cp::NULL as u32 {
         Some(ErrorCode::NullCharacterReference)

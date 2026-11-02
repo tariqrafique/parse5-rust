@@ -17,31 +17,6 @@ pub const ATTR_FACE: &str = "face";
 pub const ATTR_SIZE: &str = "size";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Namespace {
-    Html,
-    MathMl,
-    Svg,
-    XLink,
-    Xml,
-    Xmlns,
-    Other,
-}
-
-impl Namespace {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Namespace::Html => NS_HTML,
-            Namespace::MathMl => NS_MATHML,
-            Namespace::Svg => NS_SVG,
-            Namespace::XLink => NS_XLINK,
-            Namespace::Xml => NS_XML,
-            Namespace::Xmlns => NS_XMLNS,
-            Namespace::Other => "",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DocumentMode {
     NoQuirks,

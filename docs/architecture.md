@@ -36,7 +36,6 @@ The module layout mirrors upstream `packages/parse5/lib`, so a Rust file and its
 | `parser/formatting_element_list.rs` | `parser/formatting-element-list.ts` | Active formatting elements, markers, Noah's Ark clause |
 | `serializer/mod.rs` | `serializer/index.ts` | HTML serialization (`serialize`, `serialize_outer`) |
 | `tree_adapters/default.rs` | `tree-adapters/default.ts` | The tree model and default-adapter free functions |
-| `tree_adapters/interface.rs` | `tree-adapters/interface.ts` | `TreeAdapter` trait (defined, **not used by the parser**, see below) |
 | `common/*` | `common/*` | Tag/namespace tables, error codes, doctype quirks, foreign-content adjustments, tokens, named character reference index |
 
 ### Data flow
@@ -62,7 +61,7 @@ pub enum NodeData { Document{..}, DocumentFragment{..}, Element{ tag_name, attrs
 - `Node` has a hand-written iterative `Drop`, and the serializer uses an explicit work stack. Deeply nested documents (the parsing algorithm will happily nest 100k `<div>`s) therefore cannot overflow the stack when they are freed or serialized. `tests/robustness.rs` guards this.
 - `NodeData` holds owned `String`s for tag names and namespaces. That is simple, but it costs several heap allocations per element. See [performance](#performance).
 
-**The parser is hard-wired to this model.** Upstream parse5 builds whatever a `TreeAdapter` produces. Here the `TreeAdapter` trait exists and `DefaultTreeAdapter` implements it, but `Parser` calls the default-tree free functions directly. Custom adapters are emulated in JavaScript (see below).
+**The parser is hard-wired to this model.** Upstream parse5 builds whatever a `TreeAdapter` produces. This port has no `TreeAdapter` trait: `Parser` calls the default-tree free functions directly. Custom adapters are emulated in JavaScript (see below).
 
 ### Streaming and parser feedback
 
