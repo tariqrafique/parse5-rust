@@ -20,27 +20,32 @@ struct TreeConstructionTest {
     line_number: usize,
 }
 
-#[test]
-fn html5lib_tree_construction_tests1_fixture_matches_upstream() {
-    run_tree_construction_fixture(
-        &fork_tree_construction_fixture_dir().join("tests1.dat"),
-        ErrorAssertion::Compare,
-        false,
-    );
-}
-
-#[test]
-fn html5lib_tree_construction_adoption01_fixture_matches_upstream() {
-    run_tree_construction_fixture(
-        &fork_tree_construction_fixture_dir().join("adoption01.dat"),
-        ErrorAssertion::Compare,
-        false,
-    );
-}
-
+/// `HTML5LIB_FILTER=tests1.dat` or `HTML5LIB_FILTER=tests1.dat:42` runs one file
+/// or one case. The index is the 0-based case number inside that file.
 #[test]
 fn html5lib_fork_tree_construction_fixtures_match_upstream() {
-    let mut fixtures = fs::read_dir(fork_tree_construction_fixture_dir())
+    run_tree_construction_dir(
+        &fork_tree_construction_fixture_dir(),
+        ErrorAssertion::Compare,
+        true,
+    );
+}
+
+#[test]
+fn html5lib_upstream_tree_construction_fixtures_match_upstream() {
+    run_tree_construction_dir(
+        &upstream_tree_construction_fixture_dir(),
+        ErrorAssertion::Ignore,
+        false,
+    );
+}
+
+fn run_tree_construction_dir(
+    dir: &Path,
+    error_assertion: ErrorAssertion,
+    check_upstream_expected_failures: bool,
+) {
+    let mut fixtures = fs::read_dir(dir)
         .expect("tree-construction fixture directory is readable")
         .map(|entry| {
             entry
@@ -52,28 +57,40 @@ fn html5lib_fork_tree_construction_fixtures_match_upstream() {
 
     fixtures.sort();
 
-    for fixture in fixtures {
-        run_tree_construction_fixture(&fixture, ErrorAssertion::Compare, true);
-    }
-}
-
-#[test]
-fn html5lib_upstream_tree_construction_fixtures_match_upstream() {
-    let mut fixtures = fs::read_dir(upstream_tree_construction_fixture_dir())
-        .expect("upstream tree-construction fixture directory is readable")
-        .map(|entry| {
-            entry
-                .expect("upstream tree-construction fixture entry is readable")
-                .path()
-        })
-        .filter(|path| path.extension().is_some_and(|ext| ext == "dat"))
-        .collect::<Vec<_>>();
-
-    fixtures.sort();
+    let filter = html5lib_filter();
+    let mut failures = Vec::new();
+    let mut ran = 0usize;
+    let mut saw_file = false;
 
     for fixture in fixtures {
-        run_tree_construction_fixture(&fixture, ErrorAssertion::Ignore, false);
+        let fixture_name = fixture
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("fixture has a UTF-8 file name");
+        if !filter.allows_file(fixture_name) {
+            continue;
+        }
+        saw_file = true;
+        let (case_count, case_failures) = collect_tree_construction_failures(
+            &fixture,
+            error_assertion,
+            check_upstream_expected_failures,
+            &filter,
+        );
+        ran += case_count;
+        failures.extend(case_failures);
     }
+
+    if ran == 0 {
+        if filter.file.is_some() && !saw_file {
+            return;
+        }
+        panic!(
+            "HTML5LIB_FILTER={:?} matched no tree-construction cases",
+            std::env::var("HTML5LIB_FILTER").ok()
+        );
+    }
+    report_failures("tree-construction", ran, &failures);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,20 +99,100 @@ enum ErrorAssertion {
     Ignore,
 }
 
-fn run_tree_construction_fixture(
+struct CaseFailure {
+    label: String,
+    detail: String,
+}
+
+struct Html5libFilter {
+    file: Option<String>,
+    index: Option<usize>,
+}
+
+impl Html5libFilter {
+    fn allows_file(&self, file: &str) -> bool {
+        self.file.as_deref().is_none_or(|expected| expected == file)
+    }
+
+    fn allows_index(&self, index: usize) -> bool {
+        self.index.is_none_or(|expected| expected == index)
+    }
+}
+
+fn html5lib_filter() -> Html5libFilter {
+    let Ok(raw) = std::env::var("HTML5LIB_FILTER") else {
+        return Html5libFilter {
+            file: None,
+            index: None,
+        };
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Html5libFilter {
+            file: None,
+            index: None,
+        };
+    }
+    match raw.split_once(':') {
+        Some((file, index)) => Html5libFilter {
+            file: Some(file.to_string()),
+            index: Some(
+                index
+                    .parse()
+                    .unwrap_or_else(|_| panic!("HTML5LIB_FILTER index is not a number: {raw}")),
+            ),
+        },
+        None => Html5libFilter {
+            file: Some(raw.to_string()),
+            index: None,
+        },
+    }
+}
+
+fn report_failures(suite: &str, ran: usize, failures: &[CaseFailure]) {
+    if failures.is_empty() {
+        return;
+    }
+    let mut message = format!("{}/{} {suite} cases failed:\n", failures.len(), ran);
+    for failure in failures {
+        message.push_str(&format!("  {}\n", failure.label));
+    }
+    message.push('\n');
+    for failure in failures.iter().take(5) {
+        message.push_str(&failure.detail);
+        message.push('\n');
+    }
+    if failures.len() > 5 {
+        message.push_str(&format!(
+            "... {} more mismatches omitted\n",
+            failures.len() - 5
+        ));
+    }
+    panic!("{message}");
+}
+
+fn collect_tree_construction_failures(
     path: &Path,
     error_assertion: ErrorAssertion,
     check_upstream_expected_failures: bool,
-) {
+    filter: &Html5libFilter,
+) -> (usize, Vec<CaseFailure>) {
     let fixture = fs::read_to_string(path).expect("tree-construction fixture is readable");
     let fixture_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .expect("fixture has a UTF-8 file name");
+    let mut failures = Vec::new();
+    let mut ran = 0usize;
 
     for (idx, test) in parse_dat_file(&fixture).into_iter().enumerate() {
+        if !filter.allows_index(idx) {
+            continue;
+        }
+        ran += 1;
         let expect_failure =
             check_upstream_expected_failures && is_upstream_expected_failure(fixture_name, idx);
+        let label = format!("{fixture_name}#{idx} (line {})", test.line_number);
 
         let options = ParserOptions {
             scripting_enabled: test.scripting_enabled,
@@ -118,32 +215,40 @@ fn run_tree_construction_fixture(
         expected_errors.sort();
 
         if expect_failure {
-            // Upstream parse5 asserts that these cases do *not* match html5lib;
-            // mirror that so a behavioural change here is noticed.
-            assert!(
-                actual != test.expected
-                    || (matches!(error_assertion, ErrorAssertion::Compare)
-                        && actual_errors != expected_errors),
-                "{fixture_name}: case {idx} starting at line {} unexpectedly matches html5lib, \
-                 but upstream parse5 expects it to fail",
-                test.line_number
-            );
+            let tree_matches = actual == test.expected;
+            let errors_match = !matches!(error_assertion, ErrorAssertion::Compare)
+                || actual_errors == expected_errors;
+            if tree_matches && errors_match {
+                failures.push(CaseFailure {
+                    label: label.clone(),
+                    detail: format!(
+                        "{label} unexpectedly matches html5lib, but upstream parse5 expects it to fail\n"
+                    ),
+                });
+            }
             continue;
         }
 
-        assert_eq!(
-            actual, test.expected,
-            "{fixture_name}: case {idx} starting at line {}",
-            test.line_number
-        );
-        if matches!(error_assertion, ErrorAssertion::Compare) {
-            assert_eq!(
-                actual_errors, expected_errors,
-                "{fixture_name}: case {idx} starting at line {}",
-                test.line_number
-            );
+        if actual != test.expected {
+            failures.push(CaseFailure {
+                label: format!("{label} tree"),
+                detail: format!(
+                    "{label} tree\nexpected:\n{}\nactual:\n{actual}\n",
+                    test.expected
+                ),
+            });
+        }
+        if matches!(error_assertion, ErrorAssertion::Compare) && actual_errors != expected_errors {
+            failures.push(CaseFailure {
+                label: format!("{label} errors"),
+                detail: format!(
+                    "{label} errors\nexpected: {expected_errors:?}\nactual:   {actual_errors:?}\n"
+                ),
+            });
         }
     }
+
+    (ran, failures)
 }
 
 fn is_upstream_expected_failure(fixture_name: &str, idx: usize) -> bool {

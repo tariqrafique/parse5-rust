@@ -300,44 +300,80 @@ fn collect_attr_spans(
     }
 }
 
-#[test]
-fn attr_source_code_locations_match_parse5_js() {
-    let options = ParserOptions {
-        scripting_enabled: true,
-        source_code_location_info: true,
-    };
-    let mut failures = Vec::new();
+fn run_attr_case(name: &str) {
+    let (_, html, expected) = CASES
+        .iter()
+        .find(|(case_name, _, _)| *case_name == name)
+        .unwrap_or_else(|| panic!("missing attr span case {name}"));
+    let fragment = parse_fragment(
+        html,
+        ParserOptions {
+            scripting_enabled: true,
+            source_code_location_info: true,
+        },
+    );
+    let mut actual = Vec::new();
+    collect_attr_spans(&fragment, "", &mut actual);
 
-    for (name, html, expected) in CASES {
-        let fragment = parse_fragment(html, options);
-        let mut actual = Vec::new();
-        collect_attr_spans(&fragment, "", &mut actual);
+    let expected = expected
+        .iter()
+        .map(|(path, tag, attr, value, span)| {
+            (
+                path.to_string(),
+                tag.to_string(),
+                attr.to_string(),
+                value.to_string(),
+                Some(*span),
+            )
+        })
+        .collect::<Vec<_>>();
 
-        let expected = expected
-            .iter()
-            .map(|(path, tag, attr, value, span)| {
-                (
-                    path.to_string(),
-                    tag.to_string(),
-                    attr.to_string(),
-                    value.to_string(),
-                    Some(*span),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        if actual != expected {
-            failures.push(format!(
-                "{name} {html:?}\n  expected (parse5 JS): {expected:?}\n  actual   (rust):      {actual:?}"
-            ));
-        }
-    }
-
-    assert!(
-        failures.is_empty(),
-        "{} of {} cases differ from parse5 JS:\n{}",
-        failures.len(),
-        CASES.len(),
-        failures.join("\n")
+    assert_eq!(
+        actual, expected,
+        "{name} {html:?}\nexpected (parse5 JS) differs from rust"
     );
 }
+
+macro_rules! attr_cases {
+    ($($name:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                run_attr_case(stringify!($name));
+            }
+        )+
+    };
+}
+
+attr_cases!(
+    quoted_last_gt,
+    quoted_last_ws_gt,
+    quoted_last_ws_slash_gt,
+    quoted_last_slash_gt,
+    single_quoted_last_ws_slash_gt,
+    unquoted_last_gt,
+    unquoted_last_ws_gt,
+    unquoted_last_ws_slash_gt,
+    valueless_last_gt,
+    valueless_last_ws_gt,
+    valueless_last_ws_slash_gt,
+    valueless_last_slash_gt,
+    empty_value_ws_gt,
+    empty_quoted_ws_slash_gt,
+    multiple_attrs_ws_slash_gt,
+    multiple_attrs_gt,
+    multiple_attrs_valueless_last_ws_gt,
+    self_closing_void_valueless,
+    self_closing_void_quoted,
+    self_closing_void_no_space,
+    template_attrs,
+    template_nested_content,
+    newlines_in_tag,
+    newline_after_last_attr,
+    crlf_in_tag,
+    duplicate_attr_last,
+    duplicate_attr_then_other,
+    missing_ws_between_attrs,
+    char_ref_in_value,
+    multiple_elements,
+);
