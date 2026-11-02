@@ -4,24 +4,40 @@
 //! This module mirrors its state names and low-level helpers before the full
 //! state machine is wired into `Tokenizer`.
 
-use crate::common::entities::{
+pub(in crate::tokenizer) use crate::common::entities::{
     is_proper_prefix_of_named_character_reference, longest_named_character_reference_prefix,
     max_named_character_reference_len,
 };
-use crate::common::error_codes::{ErrorCode, ParserError};
-use crate::common::html::{get_tag_id, TagId};
-use crate::common::token::{
+pub(in crate::tokenizer) use crate::common::error_codes::{ErrorCode, ParserError};
+pub(in crate::tokenizer) use crate::common::html::{get_tag_id, TagId};
+pub(in crate::tokenizer) use crate::common::token::{
     get_token_attr, Attribute, CharacterToken, CommentToken, DoctypeToken, EofToken, Location,
     LocationWithAttributes, TagToken, Token, TokenType,
 };
-use crate::common::unicode::{
+pub(in crate::tokenizer) use crate::common::unicode::{
     code_points as cp, is_control_code_point, is_surrogate, is_undefined_code_point,
     sequences as seq, REPLACEMENT_CHARACTER, REPLACEMENT_CHARACTER_STR,
 };
-use preprocessor::Preprocessor;
-use std::collections::BTreeMap;
+pub(in crate::tokenizer) use preprocessor::Preprocessor;
+pub(in crate::tokenizer) use std::collections::BTreeMap;
 
+#[path = "states/attribute.rs"]
+mod attribute_states;
+#[path = "states/cdata.rs"]
+mod cdata_states;
+#[path = "char_ref.rs"]
+mod char_ref;
+#[path = "states/comment.rs"]
+mod comment_states;
+#[path = "states/data.rs"]
+mod data_states;
+#[path = "states/doctype.rs"]
+mod doctype_states;
 pub mod preprocessor;
+#[path = "states/script.rs"]
+mod script_states;
+#[path = "states/tag.rs"]
+mod tag_states;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -175,7 +191,7 @@ pub(crate) fn get_error_for_numeric_character_reference(code: u32) -> Option<Err
     }
 }
 
-fn replacement_for_numeric_character_reference(code: u32) -> u32 {
+pub(in crate::tokenizer) fn replacement_for_numeric_character_reference(code: u32) -> u32 {
     match code {
         0x00 | 0xd800..=0xdfff | 0x110000..=u32::MAX => 0xfffd,
         0x80 => 0x20ac,
@@ -343,7 +359,7 @@ impl Tokenizer {
         std::mem::take(&mut self.errors)
     }
 
-    fn run_parsing_loop(&mut self) {
+    pub(in crate::tokenizer) fn run_parsing_loop(&mut self) {
         while self.active {
             self.consumed_after_snapshot = 0;
             let code_point = self.consume();
@@ -354,7 +370,7 @@ impl Tokenizer {
         }
     }
 
-    fn ensure_hibernation(&mut self) -> bool {
+    pub(in crate::tokenizer) fn ensure_hibernation(&mut self) -> bool {
         if self.preprocessor.end_of_chunk_hit {
             self.preprocessor.retreat(self.consumed_after_snapshot);
             self.consumed_after_snapshot = 0;
@@ -365,12 +381,12 @@ impl Tokenizer {
         }
     }
 
-    fn consume(&mut self) -> i32 {
+    pub(in crate::tokenizer) fn consume(&mut self) -> i32 {
         self.consumed_after_snapshot += 1;
         self.preprocessor.advance()
     }
 
-    fn advance_by(&mut self, count: usize) {
+    pub(in crate::tokenizer) fn advance_by(&mut self, count: usize) {
         self.consumed_after_snapshot += count as isize;
 
         for _ in 0..count {
@@ -378,7 +394,11 @@ impl Tokenizer {
         }
     }
 
-    fn consume_sequence_if_match(&mut self, pattern: &str, case_sensitive: bool) -> bool {
+    pub(in crate::tokenizer) fn consume_sequence_if_match(
+        &mut self,
+        pattern: &str,
+        case_sensitive: bool,
+    ) -> bool {
         if self.preprocessor.starts_with(pattern, case_sensitive) {
             self.advance_by(pattern.encode_utf16().count().saturating_sub(1));
             true
@@ -387,20 +407,20 @@ impl Tokenizer {
         }
     }
 
-    fn err(&mut self, code: ErrorCode) {
+    pub(in crate::tokenizer) fn err(&mut self, code: ErrorCode) {
         self.err_with_offset(code, 0);
     }
 
-    fn err_with_offset(&mut self, code: ErrorCode, cp_offset: isize) {
+    pub(in crate::tokenizer) fn err_with_offset(&mut self, code: ErrorCode, cp_offset: isize) {
         self.errors
             .push(self.preprocessor.get_error(code, cp_offset));
     }
 
-    fn get_current_location(&self, offset: isize) -> Option<Location> {
+    pub(in crate::tokenizer) fn get_current_location(&self, offset: isize) -> Option<Location> {
         current_location_from(&self.preprocessor, self.options, offset)
     }
 
-    fn create_start_tag_token(&mut self) {
+    pub(in crate::tokenizer) fn create_start_tag_token(&mut self) {
         self.current_attr_committed_name = None;
         self.current_token = Some(CurrentToken::Tag(TagToken {
             token_type: TokenType::StartTag,
@@ -418,7 +438,7 @@ impl Tokenizer {
         }));
     }
 
-    fn create_end_tag_token(&mut self) {
+    pub(in crate::tokenizer) fn create_end_tag_token(&mut self) {
         self.current_attr_committed_name = None;
         self.current_token = Some(CurrentToken::Tag(TagToken {
             token_type: TokenType::EndTag,
@@ -436,7 +456,7 @@ impl Tokenizer {
         }));
     }
 
-    fn create_comment_token(&mut self, offset: isize) {
+    pub(in crate::tokenizer) fn create_comment_token(&mut self, offset: isize) {
         self.current_token = Some(CurrentToken::Comment(CommentToken {
             token_type: TokenType::Comment,
             data: String::new(),
@@ -444,7 +464,7 @@ impl Tokenizer {
         }));
     }
 
-    fn create_doctype_token(&mut self, initial_name: Option<String>) {
+    pub(in crate::tokenizer) fn create_doctype_token(&mut self, initial_name: Option<String>) {
         self.current_token = Some(CurrentToken::Doctype(DoctypeToken {
             token_type: TokenType::Doctype,
             name: initial_name,
@@ -455,7 +475,11 @@ impl Tokenizer {
         }));
     }
 
-    fn create_character_token(&mut self, token_type: TokenType, chars: String) {
+    pub(in crate::tokenizer) fn create_character_token(
+        &mut self,
+        token_type: TokenType,
+        chars: String,
+    ) {
         let raw_chars = chars.encode_utf16().collect();
         self.current_character_token = Some(CharacterToken {
             token_type,
@@ -465,13 +489,13 @@ impl Tokenizer {
         });
     }
 
-    fn create_attr(&mut self, attr_name_first_ch: &str) {
+    pub(in crate::tokenizer) fn create_attr(&mut self, attr_name_first_ch: &str) {
         self.current_attr = Attribute::new(attr_name_first_ch, "");
         self.current_attr_location = self.get_current_location(0);
         self.current_attr_committed_name = None;
     }
 
-    fn leave_attr_name(&mut self) {
+    pub(in crate::tokenizer) fn leave_attr_name(&mut self) {
         let duplicate = match &self.current_token {
             Some(CurrentToken::Tag(token)) => {
                 get_token_attr(token, &self.current_attr.name).is_some()
@@ -501,7 +525,7 @@ impl Tokenizer {
     /// Only call this where upstream calls `_leaveAttrValue` (end of the
     /// attribute name, and leaving a quoted/unquoted value on whitespace, `/`
     /// or `>`). Calling it anywhere else moves the end of the span.
-    fn leave_attr_value(&mut self) {
+    pub(in crate::tokenizer) fn leave_attr_value(&mut self) {
         if self.current_attr_committed_name.is_none() {
             return;
         }
@@ -521,7 +545,7 @@ impl Tokenizer {
     /// reference, so later value edits show up there with no extra step. This
     /// port stores copies, so it syncs them here. Doing so never moves the
     /// end of the span.
-    fn sync_committed_attr(&mut self) {
+    pub(in crate::tokenizer) fn sync_committed_attr(&mut self) {
         let Some(attr_name) = self.current_attr_committed_name.clone() else {
             return;
         };
@@ -549,19 +573,19 @@ impl Tokenizer {
         }
     }
 
-    fn prepare_location(&mut self, location: Option<Location>) {
+    pub(in crate::tokenizer) fn prepare_location(&mut self, location: Option<Location>) {
         self.emit_current_character_token(location);
         self.current_token = None;
         self.current_location = self.get_current_location(-1);
     }
 
-    fn finish_location(&self, location: &mut Location) {
+    pub(in crate::tokenizer) fn finish_location(&self, location: &mut Location) {
         location.end_line = self.preprocessor.line;
         location.end_col = self.preprocessor.col() + 1;
         location.end_offset = self.preprocessor.offset() + 1;
     }
 
-    fn emit_current_tag_token(&mut self) {
+    pub(in crate::tokenizer) fn emit_current_tag_token(&mut self) {
         self.sync_committed_attr();
         let Some(CurrentToken::Tag(mut token)) = self.current_token.take() else {
             return;
@@ -591,7 +615,7 @@ impl Tokenizer {
         self.preprocessor.drop_parsed_chunk();
     }
 
-    fn emit_current_comment(&mut self) {
+    pub(in crate::tokenizer) fn emit_current_comment(&mut self) {
         let Some(CurrentToken::Comment(mut token)) = self.current_token.take() else {
             return;
         };
@@ -606,7 +630,7 @@ impl Tokenizer {
         self.preprocessor.drop_parsed_chunk();
     }
 
-    fn emit_current_doctype(&mut self) {
+    pub(in crate::tokenizer) fn emit_current_doctype(&mut self) {
         let Some(CurrentToken::Doctype(mut token)) = self.current_token.take() else {
             return;
         };
@@ -621,7 +645,10 @@ impl Tokenizer {
         self.preprocessor.drop_parsed_chunk();
     }
 
-    fn emit_current_character_token(&mut self, next_location: Option<Location>) {
+    pub(in crate::tokenizer) fn emit_current_character_token(
+        &mut self,
+        next_location: Option<Location>,
+    ) {
         let Some(mut token) = self.current_character_token.take() else {
             return;
         };
@@ -635,7 +662,7 @@ impl Tokenizer {
         self.emit_token(Token::Character(token));
     }
 
-    fn emit_eof_token(&mut self) {
+    pub(in crate::tokenizer) fn emit_eof_token(&mut self) {
         let mut location = self.get_current_location(0);
 
         if let Some(location) = &mut location {
@@ -656,7 +683,7 @@ impl Tokenizer {
         self.paused_on_token = false;
     }
 
-    fn emit_token(&mut self, token: Token) {
+    pub(in crate::tokenizer) fn emit_token(&mut self, token: Token) {
         self.tokens.push(token);
 
         if self.pause_on_token && self.active {
@@ -665,7 +692,7 @@ impl Tokenizer {
         }
     }
 
-    fn append_char_to_current_character_token(
+    pub(in crate::tokenizer) fn append_char_to_current_character_token(
         &mut self,
         token_type: TokenType,
         value: &str,
@@ -690,7 +717,7 @@ impl Tokenizer {
         }
     }
 
-    fn emit_code_point(&mut self, code_point: i32) {
+    pub(in crate::tokenizer) fn emit_code_point(&mut self, code_point: i32) {
         let token_type = if is_whitespace(code_point) {
             TokenType::WhitespaceCharacter
         } else if code_point == cp::NULL {
@@ -706,210 +733,52 @@ impl Tokenizer {
         self.append_char_to_current_character_token(token_type, value, raw_value);
     }
 
-    fn emit_chars(&mut self, value: &str) {
+    pub(in crate::tokenizer) fn emit_chars(&mut self, value: &str) {
         let raw_value = value.encode_utf16().collect::<Vec<_>>();
 
         self.append_char_to_current_character_token(TokenType::Character, value, &raw_value);
     }
 
-    fn emit_character_reference(&mut self, decoded: &str, in_attribute: bool) {
-        if in_attribute {
-            self.current_attr.value.push_str(decoded);
-        } else {
-            for ch in decoded.chars() {
-                self.emit_code_point(ch as i32);
-            }
-        }
-    }
-
-    fn emit_literal_ampersand(&mut self, in_attribute: bool) {
-        if in_attribute {
-            self.current_attr.value.push('&');
-        } else {
-            self.emit_code_point(cp::AMPERSAND);
-        }
-    }
-
-    fn consume_character_reference(&mut self, in_attribute: bool) {
-        if self.character_reference_needs_more_input() {
-            self.hibernate_at_current_character_reference();
-            return;
-        }
-
-        if self.try_consume_numeric_character_reference(in_attribute) {
-            return;
-        }
-
-        if self.try_consume_named_character_reference(in_attribute) {
-            return;
-        }
-
-        if !in_attribute && is_ascii_alpha_numeric(self.preprocessor.peek(1)) {
-            self.return_state = self.state;
-            self.state = State::AmbiguousAmpersand;
-            self.emit_literal_ampersand(in_attribute);
-            return;
-        }
-
-        self.emit_literal_ampersand(in_attribute);
-    }
-
-    fn character_reference_needs_more_input(&self) -> bool {
-        if self.preprocessor.last_chunk_written {
-            return false;
-        }
-
-        let remaining = self.preprocessor.remaining_from_current_pos();
-
-        if remaining.len() <= 1 {
-            return true;
-        }
-
-        if remaining[1] == b'#' as u16 {
-            return numeric_character_reference_needs_more_input(&remaining[1..]);
-        }
-
-        is_proper_prefix_of_named_character_reference(remaining)
-    }
-
-    fn hibernate_at_current_character_reference(&mut self) {
-        self.preprocessor.retreat(self.consumed_after_snapshot);
-        self.consumed_after_snapshot = 0;
-        self.active = false;
-        self.preprocessor.end_of_chunk_hit = true;
-    }
-
-    fn try_consume_named_character_reference(&mut self, in_attribute: bool) -> bool {
-        let best_match = longest_named_character_reference_prefix(
-            self.preprocessor.remaining_from_current_pos(),
-        );
-
-        // Matching against every entity used to probe past the end of the
-        // buffer for longer names; keep that end-of-chunk signal for streaming.
-        self.preprocessor
-            .mark_end_of_chunk_if_shorter_than(max_named_character_reference_len());
-
-        let Some((entity, characters)) = best_match else {
-            return false;
-        };
-        let has_semicolon = entity.ends_with(';');
-        let entity_len = entity.encode_utf16().count();
-        let next = self.preprocessor.peek(entity_len as isize);
-
-        if in_attribute
-            && !has_semicolon
-            && (is_ascii_alpha_numeric(next) || next == cp::EQUALS_SIGN)
-        {
-            return false;
-        }
-
-        if !has_semicolon {
-            self.err_with_offset(
-                ErrorCode::MissingSemicolonAfterCharacterReference,
-                entity_len as isize,
-            );
-        }
-
-        self.advance_by(entity_len.saturating_sub(1));
-        self.emit_character_reference(characters, in_attribute);
-        true
-    }
-
-    fn try_consume_numeric_character_reference(&mut self, in_attribute: bool) -> bool {
-        if self.preprocessor.peek(1) != '#' as i32 {
-            return false;
-        }
-
-        let mut offset = 2;
-        let hex =
-            matches!(self.preprocessor.peek(offset), cp if cp == 'x' as i32 || cp == 'X' as i32);
-
-        if hex {
-            offset += 1;
-        }
-
-        let digits_start = offset;
-        let radix = if hex { 16 } else { 10 };
-        let mut value = 0u32;
-
-        loop {
-            let code_point = self.preprocessor.peek(offset);
-            let digit = digit_value(code_point, radix);
-
-            let Some(digit) = digit else {
-                break;
-            };
-
-            value = value.saturating_mul(radix).saturating_add(digit);
-            offset += 1;
-        }
-
-        if offset == digits_start {
-            self.err_with_offset(
-                ErrorCode::AbsenceOfDigitsInNumericCharacterReference,
-                offset,
-            );
-            self.emit_literal_ampersand(in_attribute);
-            return true;
-        }
-
-        let has_semicolon = self.preprocessor.peek(offset) == cp::SEMICOLON;
-        if has_semicolon {
-            offset += 1;
-        } else {
-            self.err_with_offset(ErrorCode::MissingSemicolonAfterCharacterReference, offset);
-        }
-
-        if let Some(error) = get_error_for_numeric_character_reference(value) {
-            self.err_with_offset(error, offset);
-        }
-
-        let replacement = replacement_for_numeric_character_reference(value);
-        self.advance_by(offset as usize - 1);
-        self.emit_character_reference(&code_point_to_string(replacement as i32), in_attribute);
-        true
-    }
-
-    fn tag_token_mut(&mut self) -> &mut TagToken {
+    pub(in crate::tokenizer) fn tag_token_mut(&mut self) -> &mut TagToken {
         match self.current_token.as_mut() {
             Some(CurrentToken::Tag(token)) => token,
             _ => panic!("current token must be a tag token"),
         }
     }
 
-    fn comment_token_mut(&mut self) -> &mut CommentToken {
+    pub(in crate::tokenizer) fn comment_token_mut(&mut self) -> &mut CommentToken {
         match self.current_token.as_mut() {
             Some(CurrentToken::Comment(token)) => token,
             _ => panic!("current token must be a comment token"),
         }
     }
 
-    fn doctype_token_mut(&mut self) -> &mut DoctypeToken {
+    pub(in crate::tokenizer) fn doctype_token_mut(&mut self) -> &mut DoctypeToken {
         match self.current_token.as_mut() {
             Some(CurrentToken::Doctype(token)) => token,
             _ => panic!("current token must be a doctype token"),
         }
     }
 
-    fn current_doctype_name_mut(&mut self) -> &mut String {
+    pub(in crate::tokenizer) fn current_doctype_name_mut(&mut self) -> &mut String {
         self.doctype_token_mut()
             .name
             .get_or_insert_with(String::new)
     }
 
-    fn current_doctype_public_id_mut(&mut self) -> &mut String {
+    pub(in crate::tokenizer) fn current_doctype_public_id_mut(&mut self) -> &mut String {
         self.doctype_token_mut()
             .public_id
             .get_or_insert_with(String::new)
     }
 
-    fn current_doctype_system_id_mut(&mut self) -> &mut String {
+    pub(in crate::tokenizer) fn current_doctype_system_id_mut(&mut self) -> &mut String {
         self.doctype_token_mut()
             .system_id
             .get_or_insert_with(String::new)
     }
 
-    fn call_state(&mut self, code_point: i32) {
+    pub(in crate::tokenizer) fn call_state(&mut self, code_point: i32) {
         match self.state {
             State::Data => self.state_data(code_point),
             State::RcData => self.state_rcdata(code_point),
@@ -1043,1386 +912,7 @@ impl Tokenizer {
         }
     }
 
-    fn state_data(&mut self, code_point: i32) {
-        match code_point {
-            cp::LESS_THAN_SIGN => self.state = State::TagOpen,
-            cp::AMPERSAND => self.consume_character_reference(false),
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_code_point(code_point);
-            }
-            cp::EOF => self.emit_eof_token(),
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_ambiguous_ampersand(&mut self, code_point: i32) {
-        if is_ascii_alpha_numeric(code_point) {
-            self.emit_character_reference(&code_point_to_string(code_point), false);
-        } else {
-            if code_point == cp::SEMICOLON {
-                self.err(ErrorCode::UnknownNamedCharacterReference);
-            }
-
-            self.state = self.return_state;
-            self.call_state(code_point);
-        }
-    }
-
-    fn state_rcdata(&mut self, code_point: i32) {
-        match code_point {
-            cp::AMPERSAND => self.consume_character_reference(false),
-            cp::LESS_THAN_SIGN => self.state = State::RcDataLessThanSign,
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => self.emit_eof_token(),
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_rawtext(&mut self, code_point: i32) {
-        match code_point {
-            cp::LESS_THAN_SIGN => self.state = State::RawTextLessThanSign,
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => self.emit_eof_token(),
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_script_data(&mut self, code_point: i32) {
-        match code_point {
-            cp::LESS_THAN_SIGN => self.state = State::ScriptDataLessThanSign,
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => self.emit_eof_token(),
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_plaintext(&mut self, code_point: i32) {
-        match code_point {
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => self.emit_eof_token(),
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.create_start_tag_token();
-            self.state = State::TagName;
-            self.state_tag_name(code_point);
-            return;
-        }
-
-        match code_point {
-            cp::EXCLAMATION_MARK => self.state = State::MarkupDeclarationOpen,
-            cp::SOLIDUS => self.state = State::EndTagOpen,
-            cp::QUESTION_MARK => {
-                self.err(ErrorCode::UnexpectedQuestionMarkInsteadOfTagName);
-                self.create_comment_token(1);
-                self.state = State::BogusComment;
-                self.state_bogus_comment(code_point);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofBeforeTagName);
-                self.emit_chars("<");
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::InvalidFirstCharacterOfTagName);
-                self.emit_chars("<");
-                self.state = State::Data;
-                self.state_data(code_point);
-            }
-        }
-    }
-
-    fn state_end_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.create_end_tag_token();
-            self.state = State::TagName;
-            self.state_tag_name(code_point);
-            return;
-        }
-
-        match code_point {
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingEndTagName);
-                self.state = State::Data;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofBeforeTagName);
-                self.emit_chars("</");
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::InvalidFirstCharacterOfTagName);
-                self.create_comment_token(2);
-                self.state = State::BogusComment;
-                self.state_bogus_comment(code_point);
-            }
-        }
-    }
-
-    fn state_tag_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::BeforeAttributeName;
-            }
-            cp::SOLIDUS => self.state = State::SelfClosingStartTag,
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.tag_token_mut().tag_name.push(REPLACEMENT_CHARACTER);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => {
-                let code_point = if is_ascii_upper(code_point) {
-                    to_ascii_lower(code_point)
-                } else {
-                    code_point
-                };
-                self.tag_token_mut()
-                    .tag_name
-                    .extend(code_point_to_char(code_point));
-            }
-        }
-    }
-
-    fn state_rcdata_less_than_sign(&mut self, code_point: i32) {
-        if code_point == cp::SOLIDUS {
-            self.state = State::RcDataEndTagOpen;
-        } else {
-            self.emit_chars("<");
-            self.state = State::RcData;
-            self.state_rcdata(code_point);
-        }
-    }
-
-    fn state_rcdata_end_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.state = State::RcDataEndTagName;
-            self.state_rcdata_end_tag_name(code_point);
-        } else {
-            self.emit_chars("</");
-            self.state = State::RcData;
-            self.state_rcdata(code_point);
-        }
-    }
-
-    fn state_rcdata_end_tag_name(&mut self, code_point: i32) {
-        if self.handle_special_end_tag(State::RcData) {
-            self.emit_chars("</");
-            self.state = State::RcData;
-            self.state_rcdata(code_point);
-        }
-    }
-
-    fn state_rawtext_less_than_sign(&mut self, code_point: i32) {
-        if code_point == cp::SOLIDUS {
-            self.state = State::RawTextEndTagOpen;
-        } else {
-            self.emit_chars("<");
-            self.state = State::RawText;
-            self.state_rawtext(code_point);
-        }
-    }
-
-    fn state_rawtext_end_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.state = State::RawTextEndTagName;
-            self.state_rawtext_end_tag_name(code_point);
-        } else {
-            self.emit_chars("</");
-            self.state = State::RawText;
-            self.state_rawtext(code_point);
-        }
-    }
-
-    fn state_rawtext_end_tag_name(&mut self, code_point: i32) {
-        if self.handle_special_end_tag(State::RawText) {
-            self.emit_chars("</");
-            self.state = State::RawText;
-            self.state_rawtext(code_point);
-        }
-    }
-
-    fn state_script_data_less_than_sign(&mut self, code_point: i32) {
-        match code_point {
-            cp::SOLIDUS => self.state = State::ScriptDataEndTagOpen,
-            cp::EXCLAMATION_MARK => {
-                self.state = State::ScriptDataEscapeStart;
-                self.emit_chars("<!");
-            }
-            _ => {
-                self.emit_chars("<");
-                self.state = State::ScriptData;
-                self.state_script_data(code_point);
-            }
-        }
-    }
-
-    fn state_script_data_end_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.state = State::ScriptDataEndTagName;
-            self.state_script_data_end_tag_name(code_point);
-        } else {
-            self.emit_chars("</");
-            self.state = State::ScriptData;
-            self.state_script_data(code_point);
-        }
-    }
-
-    fn state_script_data_end_tag_name(&mut self, code_point: i32) {
-        if self.handle_special_end_tag(State::ScriptData) {
-            self.emit_chars("</");
-            self.state = State::ScriptData;
-            self.state_script_data(code_point);
-        }
-    }
-
-    fn state_script_data_escape_start(&mut self, code_point: i32) {
-        if code_point == cp::HYPHEN_MINUS {
-            self.state = State::ScriptDataEscapeStartDash;
-            self.emit_chars("-");
-        } else {
-            self.state = State::ScriptData;
-            self.state_script_data(code_point);
-        }
-    }
-
-    fn state_script_data_escape_start_dash(&mut self, code_point: i32) {
-        if code_point == cp::HYPHEN_MINUS {
-            self.state = State::ScriptDataEscapedDashDash;
-            self.emit_chars("-");
-        } else {
-            self.state = State::ScriptData;
-            self.state_script_data(code_point);
-        }
-    }
-
-    fn state_script_data_escaped(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => {
-                self.state = State::ScriptDataEscapedDash;
-                self.emit_chars("-");
-            }
-            cp::LESS_THAN_SIGN => self.state = State::ScriptDataEscapedLessThanSign,
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_script_data_escaped_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => {
-                self.state = State::ScriptDataEscapedDashDash;
-                self.emit_chars("-");
-            }
-            cp::LESS_THAN_SIGN => self.state = State::ScriptDataEscapedLessThanSign,
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.state = State::ScriptDataEscaped;
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.state = State::ScriptDataEscaped;
-                self.emit_code_point(code_point);
-            }
-        }
-    }
-
-    fn state_script_data_escaped_dash_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.emit_chars("-"),
-            cp::LESS_THAN_SIGN => self.state = State::ScriptDataEscapedLessThanSign,
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::ScriptData;
-                self.emit_chars(">");
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.state = State::ScriptDataEscaped;
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.state = State::ScriptDataEscaped;
-                self.emit_code_point(code_point);
-            }
-        }
-    }
-
-    fn state_script_data_escaped_less_than_sign(&mut self, code_point: i32) {
-        if code_point == cp::SOLIDUS {
-            self.state = State::ScriptDataEscapedEndTagOpen;
-        } else if is_ascii_letter(code_point) {
-            self.emit_chars("<");
-            self.state = State::ScriptDataDoubleEscapeStart;
-            self.state_script_data_double_escape_start(code_point);
-        } else {
-            self.emit_chars("<");
-            self.state = State::ScriptDataEscaped;
-            self.state_script_data_escaped(code_point);
-        }
-    }
-
-    fn state_script_data_escaped_end_tag_open(&mut self, code_point: i32) {
-        if is_ascii_letter(code_point) {
-            self.state = State::ScriptDataEscapedEndTagName;
-            self.state_script_data_escaped_end_tag_name(code_point);
-        } else {
-            self.emit_chars("</");
-            self.state = State::ScriptDataEscaped;
-            self.state_script_data_escaped(code_point);
-        }
-    }
-
-    fn state_script_data_escaped_end_tag_name(&mut self, code_point: i32) {
-        if self.handle_special_end_tag(State::ScriptDataEscaped) {
-            self.emit_chars("</");
-            self.state = State::ScriptDataEscaped;
-            self.state_script_data_escaped(code_point);
-        }
-    }
-
-    fn state_script_data_double_escape_start(&mut self, code_point: i32) {
-        if self.preprocessor.starts_with(seq::SCRIPT, false)
-            && is_script_data_double_escape_sequence_end(
-                self.preprocessor.peek(seq::SCRIPT.len() as isize),
-            )
-        {
-            self.emit_code_point(code_point);
-
-            for _ in 0..seq::SCRIPT.len() {
-                let code_point = self.consume();
-                self.emit_code_point(code_point);
-            }
-
-            self.state = State::ScriptDataDoubleEscaped;
-        } else if !self.ensure_hibernation() {
-            self.state = State::ScriptDataEscaped;
-            self.state_script_data_escaped(code_point);
-        }
-    }
-
-    fn state_script_data_double_escaped(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => {
-                self.state = State::ScriptDataDoubleEscapedDash;
-                self.emit_chars("-");
-            }
-            cp::LESS_THAN_SIGN => {
-                self.state = State::ScriptDataDoubleEscapedLessThanSign;
-                self.emit_chars("<");
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_script_data_double_escaped_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => {
-                self.state = State::ScriptDataDoubleEscapedDashDash;
-                self.emit_chars("-");
-            }
-            cp::LESS_THAN_SIGN => {
-                self.state = State::ScriptDataDoubleEscapedLessThanSign;
-                self.emit_chars("<");
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.state = State::ScriptDataDoubleEscaped;
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.state = State::ScriptDataDoubleEscaped;
-                self.emit_code_point(code_point);
-            }
-        }
-    }
-
-    fn state_script_data_double_escaped_dash_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.emit_chars("-"),
-            cp::LESS_THAN_SIGN => {
-                self.state = State::ScriptDataDoubleEscapedLessThanSign;
-                self.emit_chars("<");
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::ScriptData;
-                self.emit_chars(">");
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.state = State::ScriptDataDoubleEscaped;
-                self.emit_chars(REPLACEMENT_CHARACTER_STR);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInScriptHtmlCommentLikeText);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.state = State::ScriptDataDoubleEscaped;
-                self.emit_code_point(code_point);
-            }
-        }
-    }
-
-    fn state_script_data_double_escaped_less_than_sign(&mut self, code_point: i32) {
-        if code_point == cp::SOLIDUS {
-            self.state = State::ScriptDataDoubleEscapeEnd;
-            self.emit_chars("/");
-        } else {
-            self.state = State::ScriptDataDoubleEscaped;
-            self.state_script_data_double_escaped(code_point);
-        }
-    }
-
-    fn state_script_data_double_escape_end(&mut self, code_point: i32) {
-        if self.preprocessor.starts_with(seq::SCRIPT, false)
-            && is_script_data_double_escape_sequence_end(
-                self.preprocessor.peek(seq::SCRIPT.len() as isize),
-            )
-        {
-            self.emit_code_point(code_point);
-
-            for _ in 0..seq::SCRIPT.len() {
-                let code_point = self.consume();
-                self.emit_code_point(code_point);
-            }
-
-            self.state = State::ScriptDataEscaped;
-        } else if !self.ensure_hibernation() {
-            self.state = State::ScriptDataDoubleEscaped;
-            self.state_script_data_double_escaped(code_point);
-        }
-    }
-
-    fn handle_special_end_tag(&mut self, _text_state: State) -> bool {
-        if self.last_start_tag_name.is_empty()
-            || !self
-                .preprocessor
-                .starts_with(&self.last_start_tag_name, false)
-        {
-            return !self.ensure_hibernation();
-        }
-
-        let tag_name = self.last_start_tag_name.clone();
-        self.create_end_tag_token();
-        self.tag_token_mut().tag_name = tag_name.clone();
-        let peek = self
-            .preprocessor
-            .peek(tag_name.encode_utf16().count() as isize);
-
-        match peek {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.advance_by(tag_name.encode_utf16().count());
-                self.state = State::BeforeAttributeName;
-                false
-            }
-            cp::SOLIDUS => {
-                self.advance_by(tag_name.encode_utf16().count());
-                self.state = State::SelfClosingStartTag;
-                false
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.advance_by(tag_name.encode_utf16().count());
-                self.emit_current_tag_token();
-                self.state = State::Data;
-                false
-            }
-            _ => !self.ensure_hibernation(),
-        }
-    }
-
-    fn state_before_attribute_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::SOLIDUS | cp::GREATER_THAN_SIGN | cp::EOF => {
-                self.state = State::AfterAttributeName;
-                self.state_after_attribute_name(code_point);
-            }
-            cp::EQUALS_SIGN => {
-                self.err(ErrorCode::UnexpectedEqualsSignBeforeAttributeName);
-                self.create_attr("=");
-                self.state = State::AttributeName;
-            }
-            _ => {
-                self.create_attr("");
-                self.state = State::AttributeName;
-                self.state_attribute_name(code_point);
-            }
-        }
-    }
-
-    fn state_attribute_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE
-            | cp::LINE_FEED
-            | cp::TABULATION
-            | cp::FORM_FEED
-            | cp::SOLIDUS
-            | cp::GREATER_THAN_SIGN
-            | cp::EOF => {
-                self.leave_attr_name();
-                self.state = State::AfterAttributeName;
-                self.state_after_attribute_name(code_point);
-            }
-            cp::EQUALS_SIGN => {
-                self.leave_attr_name();
-                self.state = State::BeforeAttributeValue;
-            }
-            cp::QUOTATION_MARK | cp::APOSTROPHE | cp::LESS_THAN_SIGN => {
-                self.err(ErrorCode::UnexpectedCharacterInAttributeName);
-                self.current_attr
-                    .name
-                    .extend(code_point_to_char(code_point));
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.current_attr.name.push(REPLACEMENT_CHARACTER);
-            }
-            _ => {
-                let code_point = if is_ascii_upper(code_point) {
-                    to_ascii_lower(code_point)
-                } else {
-                    code_point
-                };
-                self.current_attr
-                    .name
-                    .extend(code_point_to_char(code_point));
-            }
-        }
-    }
-
-    fn state_after_attribute_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::SOLIDUS => self.state = State::SelfClosingStartTag,
-            cp::EQUALS_SIGN => self.state = State::BeforeAttributeValue,
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.create_attr("");
-                self.state = State::AttributeName;
-                self.state_attribute_name(code_point);
-            }
-        }
-    }
-
-    fn state_before_attribute_value(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::QUOTATION_MARK => self.state = State::AttributeValueDoubleQuoted,
-            cp::APOSTROPHE => self.state = State::AttributeValueSingleQuoted,
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingAttributeValue);
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            _ => {
-                self.state = State::AttributeValueUnquoted;
-                self.state_attribute_value_unquoted(code_point);
-            }
-        }
-    }
-
-    fn state_attribute_value_double_quoted(&mut self, code_point: i32) {
-        match code_point {
-            cp::QUOTATION_MARK => self.state = State::AfterAttributeValueQuoted,
-            cp::AMPERSAND => self.consume_character_reference(true),
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.current_attr.value.push(REPLACEMENT_CHARACTER);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => self
-                .current_attr
-                .value
-                .extend(code_point_to_char(code_point)),
-        }
-    }
-
-    fn state_attribute_value_single_quoted(&mut self, code_point: i32) {
-        match code_point {
-            cp::APOSTROPHE => self.state = State::AfterAttributeValueQuoted,
-            cp::AMPERSAND => self.consume_character_reference(true),
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.current_attr.value.push(REPLACEMENT_CHARACTER);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => self
-                .current_attr
-                .value
-                .extend(code_point_to_char(code_point)),
-        }
-    }
-
-    fn state_attribute_value_unquoted(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.leave_attr_value();
-                self.state = State::BeforeAttributeName;
-            }
-            cp::AMPERSAND => self.consume_character_reference(true),
-            cp::GREATER_THAN_SIGN => {
-                self.leave_attr_value();
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.current_attr.value.push(REPLACEMENT_CHARACTER);
-            }
-            cp::QUOTATION_MARK
-            | cp::APOSTROPHE
-            | cp::LESS_THAN_SIGN
-            | cp::EQUALS_SIGN
-            | cp::GRAVE_ACCENT => {
-                self.err(ErrorCode::UnexpectedCharacterInUnquotedAttributeValue);
-                self.current_attr
-                    .value
-                    .extend(code_point_to_char(code_point));
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => self
-                .current_attr
-                .value
-                .extend(code_point_to_char(code_point)),
-        }
-    }
-
-    fn state_after_attribute_value_quoted(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.leave_attr_value();
-                self.state = State::BeforeAttributeName;
-            }
-            cp::SOLIDUS => {
-                self.leave_attr_value();
-                self.state = State::SelfClosingStartTag;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.leave_attr_value();
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingWhitespaceBetweenAttributes);
-                // Upstream does not call `_leaveAttrValue` here, so the span
-                // keeps the end recorded when the attribute name ended.
-                self.sync_committed_attr();
-                self.state = State::BeforeAttributeName;
-                self.state_before_attribute_name(code_point);
-            }
-        }
-    }
-
-    fn state_self_closing_start_tag(&mut self, code_point: i32) {
-        match code_point {
-            cp::GREATER_THAN_SIGN => {
-                self.tag_token_mut().self_closing = true;
-                self.state = State::Data;
-                self.emit_current_tag_token();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInTag);
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::UnexpectedSolidusInTag);
-                self.state = State::BeforeAttributeName;
-                self.state_before_attribute_name(code_point);
-            }
-        }
-    }
-
-    fn state_bogus_comment(&mut self, code_point: i32) {
-        match code_point {
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_comment();
-            }
-            cp::EOF => {
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.comment_token_mut().data.push(REPLACEMENT_CHARACTER);
-            }
-            _ => self
-                .comment_token_mut()
-                .data
-                .extend(code_point_to_char(code_point)),
-        }
-    }
-
-    fn state_markup_declaration_open(&mut self, code_point: i32) {
-        if self.consume_sequence_if_match(seq::DASH_DASH, true) {
-            self.create_comment_token(seq::DASH_DASH.len() as isize + 1);
-            self.state = State::CommentStart;
-        } else if self.consume_sequence_if_match(seq::DOCTYPE, false) {
-            self.current_location = self.get_current_location(seq::DOCTYPE.len() as isize + 1);
-            self.state = State::Doctype;
-        } else if self.consume_sequence_if_match(seq::CDATA_START, true) {
-            if self.in_foreign_node {
-                self.state = State::CDataSection;
-            } else {
-                self.err(ErrorCode::CdataInHtmlContent);
-                self.create_comment_token(seq::CDATA_START.len() as isize + 1);
-                self.comment_token_mut().data = "[CDATA[".to_string();
-                self.state = State::BogusComment;
-            }
-        } else if !self.ensure_hibernation() {
-            self.err(ErrorCode::IncorrectlyOpenedComment);
-            self.create_comment_token(2);
-            self.state = State::BogusComment;
-            self.state_bogus_comment(code_point);
-        }
-    }
-
-    fn state_comment_start(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.state = State::CommentStartDash,
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::AbruptClosingOfEmptyComment);
-                self.state = State::Data;
-                self.emit_current_comment();
-            }
-            _ => {
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_comment_start_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.state = State::CommentEnd,
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::AbruptClosingOfEmptyComment);
-                self.state = State::Data;
-                self.emit_current_comment();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInComment);
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.comment_token_mut().data.push('-');
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_comment(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.state = State::CommentEndDash,
-            cp::LESS_THAN_SIGN => {
-                self.comment_token_mut().data.push('<');
-                self.state = State::CommentLessThanSign;
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.comment_token_mut().data.push(REPLACEMENT_CHARACTER);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInComment);
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            _ => self
-                .comment_token_mut()
-                .data
-                .extend(code_point_to_char(code_point)),
-        }
-    }
-
-    fn state_comment_less_than_sign(&mut self, code_point: i32) {
-        match code_point {
-            cp::EXCLAMATION_MARK => {
-                self.comment_token_mut().data.push('!');
-                self.state = State::CommentLessThanSignBang;
-            }
-            cp::LESS_THAN_SIGN => self.comment_token_mut().data.push('<'),
-            _ => {
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_comment_less_than_sign_bang(&mut self, code_point: i32) {
-        if code_point == cp::HYPHEN_MINUS {
-            self.state = State::CommentLessThanSignBangDash;
-        } else {
-            self.state = State::Comment;
-            self.state_comment(code_point);
-        }
-    }
-
-    fn state_comment_less_than_sign_bang_dash(&mut self, code_point: i32) {
-        if code_point == cp::HYPHEN_MINUS {
-            self.state = State::CommentLessThanSignBangDashDash;
-        } else {
-            self.state = State::CommentEndDash;
-            self.state_comment_end_dash(code_point);
-        }
-    }
-
-    fn state_comment_less_than_sign_bang_dash_dash(&mut self, code_point: i32) {
-        if code_point != cp::GREATER_THAN_SIGN && code_point != cp::EOF {
-            self.err(ErrorCode::NestedComment);
-        }
-
-        self.state = State::CommentEnd;
-        self.state_comment_end(code_point);
-    }
-
-    fn state_comment_end_dash(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => self.state = State::CommentEnd,
-            cp::EOF => {
-                self.err(ErrorCode::EofInComment);
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.comment_token_mut().data.push('-');
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_comment_end(&mut self, code_point: i32) {
-        match code_point {
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_comment();
-            }
-            cp::EXCLAMATION_MARK => self.state = State::CommentEndBang,
-            cp::HYPHEN_MINUS => self.comment_token_mut().data.push('-'),
-            cp::EOF => {
-                self.err(ErrorCode::EofInComment);
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.comment_token_mut().data.push_str("--");
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_comment_end_bang(&mut self, code_point: i32) {
-        match code_point {
-            cp::HYPHEN_MINUS => {
-                self.comment_token_mut().data.push_str("--!");
-                self.state = State::CommentEndDash;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::IncorrectlyClosedComment);
-                self.state = State::Data;
-                self.emit_current_comment();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInComment);
-                self.emit_current_comment();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.comment_token_mut().data.push_str("--!");
-                self.state = State::Comment;
-                self.state_comment(code_point);
-            }
-        }
-    }
-
-    fn state_doctype(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::BeforeDoctypeName;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::BeforeDoctypeName;
-                self.state_before_doctype_name(code_point);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.create_doctype_token(None);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingWhitespaceBeforeDoctypeName);
-                self.state = State::BeforeDoctypeName;
-                self.state_before_doctype_name(code_point);
-            }
-        }
-    }
-
-    fn state_before_doctype_name(&mut self, code_point: i32) {
-        if is_ascii_upper(code_point) {
-            self.create_doctype_token(Some(code_point_to_string(to_ascii_lower(code_point))));
-            self.state = State::DoctypeName;
-            return;
-        }
-
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.create_doctype_token(Some(REPLACEMENT_CHARACTER.to_string()));
-                self.state = State::DoctypeName;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingDoctypeName);
-                self.create_doctype_token(None);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.state = State::Data;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.create_doctype_token(None);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.create_doctype_token(Some(code_point_to_string(code_point)));
-                self.state = State::DoctypeName;
-            }
-        }
-    }
-
-    fn state_doctype_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::AfterDoctypeName;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                self.current_doctype_name_mut().push(REPLACEMENT_CHARACTER);
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                let code_point = if is_ascii_upper(code_point) {
-                    to_ascii_lower(code_point)
-                } else {
-                    code_point
-                };
-                self.current_doctype_name_mut()
-                    .extend(code_point_to_char(code_point));
-            }
-        }
-    }
-
-    fn state_after_doctype_name(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                if self.consume_sequence_if_match(seq::PUBLIC, false) {
-                    self.state = State::AfterDoctypePublicKeyword;
-                } else if self.consume_sequence_if_match(seq::SYSTEM, false) {
-                    self.state = State::AfterDoctypeSystemKeyword;
-                } else if !self.ensure_hibernation() {
-                    self.err(ErrorCode::InvalidCharacterSequenceAfterDoctypeName);
-                    self.doctype_token_mut().force_quirks = true;
-                    self.state = State::BogusDoctype;
-                    self.state_bogus_doctype(code_point);
-                }
-            }
-        }
-    }
-
-    fn state_after_doctype_public_keyword(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::BeforeDoctypePublicIdentifier;
-            }
-            cp::QUOTATION_MARK => {
-                self.err(ErrorCode::MissingWhitespaceAfterDoctypePublicKeyword);
-                self.doctype_token_mut().public_id = Some(String::new());
-                self.state = State::DoctypePublicIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.err(ErrorCode::MissingWhitespaceAfterDoctypePublicKeyword);
-                self.doctype_token_mut().public_id = Some(String::new());
-                self.state = State::DoctypePublicIdentifierSingleQuoted;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingDoctypePublicIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypePublicIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_before_doctype_public_identifier(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::QUOTATION_MARK => {
-                self.doctype_token_mut().public_id = Some(String::new());
-                self.state = State::DoctypePublicIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.doctype_token_mut().public_id = Some(String::new());
-                self.state = State::DoctypePublicIdentifierSingleQuoted;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingDoctypePublicIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypePublicIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_doctype_public_identifier_double_quoted(&mut self, code_point: i32) {
-        self.state_doctype_identifier_quoted(code_point, true, true);
-    }
-
-    fn state_doctype_public_identifier_single_quoted(&mut self, code_point: i32) {
-        self.state_doctype_identifier_quoted(code_point, true, false);
-    }
-
-    fn state_after_doctype_public_identifier(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::BetweenDoctypePublicAndSystemIdentifiers;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::QUOTATION_MARK => {
-                self.err(ErrorCode::MissingWhitespaceBetweenDoctypePublicAndSystemIdentifiers);
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.err(ErrorCode::MissingWhitespaceBetweenDoctypePublicAndSystemIdentifiers);
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierSingleQuoted;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_between_doctype_public_and_system_identifiers(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::GREATER_THAN_SIGN => {
-                self.emit_current_doctype();
-                self.state = State::Data;
-            }
-            cp::QUOTATION_MARK => {
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierSingleQuoted;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_after_doctype_system_keyword(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {
-                self.state = State::BeforeDoctypeSystemIdentifier;
-            }
-            cp::QUOTATION_MARK => {
-                self.err(ErrorCode::MissingWhitespaceAfterDoctypeSystemKeyword);
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.err(ErrorCode::MissingWhitespaceAfterDoctypeSystemKeyword);
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierSingleQuoted;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_before_doctype_system_identifier(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::QUOTATION_MARK => {
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierDoubleQuoted;
-            }
-            cp::APOSTROPHE => {
-                self.doctype_token_mut().system_id = Some(String::new());
-                self.state = State::DoctypeSystemIdentifierSingleQuoted;
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(ErrorCode::MissingDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::Data;
-                self.emit_current_doctype();
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::MissingQuoteBeforeDoctypeSystemIdentifier);
-                self.doctype_token_mut().force_quirks = true;
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_doctype_system_identifier_double_quoted(&mut self, code_point: i32) {
-        self.state_doctype_identifier_quoted(code_point, false, true);
-    }
-
-    fn state_doctype_system_identifier_single_quoted(&mut self, code_point: i32) {
-        self.state_doctype_identifier_quoted(code_point, false, false);
-    }
-
-    fn state_after_doctype_system_identifier(&mut self, code_point: i32) {
-        match code_point {
-            cp::SPACE | cp::LINE_FEED | cp::TABULATION | cp::FORM_FEED => {}
-            cp::GREATER_THAN_SIGN => {
-                self.emit_current_doctype();
-                self.state = State::Data;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                self.err(ErrorCode::UnexpectedCharacterAfterDoctypeSystemIdentifier);
-                self.state = State::BogusDoctype;
-                self.state_bogus_doctype(code_point);
-            }
-        }
-    }
-
-    fn state_doctype_identifier_quoted(
-        &mut self,
-        code_point: i32,
-        is_public: bool,
-        double_quoted: bool,
-    ) {
-        let quote = if double_quoted {
-            cp::QUOTATION_MARK
-        } else {
-            cp::APOSTROPHE
-        };
-
-        if code_point == quote {
-            self.state = if is_public {
-                State::AfterDoctypePublicIdentifier
-            } else {
-                State::AfterDoctypeSystemIdentifier
-            };
-            return;
-        }
-
-        match code_point {
-            cp::NULL => {
-                self.err(ErrorCode::UnexpectedNullCharacter);
-                if is_public {
-                    self.current_doctype_public_id_mut()
-                        .push(REPLACEMENT_CHARACTER);
-                } else {
-                    self.current_doctype_system_id_mut()
-                        .push(REPLACEMENT_CHARACTER);
-                }
-            }
-            cp::GREATER_THAN_SIGN => {
-                self.err(if is_public {
-                    ErrorCode::AbruptDoctypePublicIdentifier
-                } else {
-                    ErrorCode::AbruptDoctypeSystemIdentifier
-                });
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.state = State::Data;
-            }
-            cp::EOF => {
-                self.err(ErrorCode::EofInDoctype);
-                self.doctype_token_mut().force_quirks = true;
-                self.emit_current_doctype();
-                self.emit_eof_token();
-            }
-            _ => {
-                if is_public {
-                    self.current_doctype_public_id_mut()
-                        .extend(code_point_to_char(code_point));
-                } else {
-                    self.current_doctype_system_id_mut()
-                        .extend(code_point_to_char(code_point));
-                }
-            }
-        }
-    }
-
-    fn state_bogus_doctype(&mut self, code_point: i32) {
+    pub(in crate::tokenizer) fn state_bogus_doctype(&mut self, code_point: i32) {
         match code_point {
             cp::GREATER_THAN_SIGN => {
                 self.emit_current_doctype();
@@ -2436,42 +926,9 @@ impl Tokenizer {
             _ => {}
         }
     }
-
-    fn state_cdata_section(&mut self, code_point: i32) {
-        match code_point {
-            cp::RIGHT_SQUARE_BRACKET => self.state = State::CDataSectionBracket,
-            cp::EOF => {
-                self.err(ErrorCode::EofInCdata);
-                self.emit_eof_token();
-            }
-            _ => self.emit_code_point(code_point),
-        }
-    }
-
-    fn state_cdata_section_bracket(&mut self, code_point: i32) {
-        if code_point == cp::RIGHT_SQUARE_BRACKET {
-            self.state = State::CDataSectionEnd;
-        } else {
-            self.emit_chars("]");
-            self.state = State::CDataSection;
-            self.state_cdata_section(code_point);
-        }
-    }
-
-    fn state_cdata_section_end(&mut self, code_point: i32) {
-        match code_point {
-            cp::GREATER_THAN_SIGN => self.state = State::Data,
-            cp::RIGHT_SQUARE_BRACKET => self.emit_chars("]"),
-            _ => {
-                self.emit_chars("]]");
-                self.state = State::CDataSection;
-                self.state_cdata_section(code_point);
-            }
-        }
-    }
 }
 
-fn current_location_from(
+pub(in crate::tokenizer) fn current_location_from(
     preprocessor: &Preprocessor,
     options: TokenizerOptions,
     offset: isize,
@@ -2492,20 +949,20 @@ fn current_location_from(
     })
 }
 
-fn code_point_to_char(code_point: i32) -> Option<char> {
+pub(in crate::tokenizer) fn code_point_to_char(code_point: i32) -> Option<char> {
     u32::try_from(code_point)
         .ok()
         .map(|code_point| char::from_u32(code_point).unwrap_or(REPLACEMENT_CHARACTER))
 }
 
-fn code_point_to_string(code_point: i32) -> String {
+pub(in crate::tokenizer) fn code_point_to_string(code_point: i32) -> String {
     code_point_to_char(code_point)
         .map(String::from)
         .unwrap_or_default()
 }
 
 /// Encodes `code_point` as UTF-16 into `buf`, keeping lone surrogates as-is.
-fn code_point_to_utf16(code_point: i32, buf: &mut [u16; 2]) -> &[u16] {
+pub(in crate::tokenizer) fn code_point_to_utf16(code_point: i32, buf: &mut [u16; 2]) -> &[u16] {
     match code_point {
         ..0 => &[],
         0xd800..=0xdfff => {
@@ -2516,12 +973,14 @@ fn code_point_to_utf16(code_point: i32, buf: &mut [u16; 2]) -> &[u16] {
     }
 }
 
-fn digit_value(code_point: i32, radix: u32) -> Option<u32> {
+pub(in crate::tokenizer) fn digit_value(code_point: i32, radix: u32) -> Option<u32> {
     let ch = char::from_u32(code_point as u32)?;
     ch.to_digit(radix)
 }
 
-fn numeric_character_reference_needs_more_input(remaining_after_ampersand: &[u16]) -> bool {
+pub(in crate::tokenizer) fn numeric_character_reference_needs_more_input(
+    remaining_after_ampersand: &[u16],
+) -> bool {
     debug_assert_eq!(
         remaining_after_ampersand.first().copied(),
         Some(b'#' as u16)
@@ -2561,505 +1020,4 @@ fn numeric_character_reference_needs_more_input(remaining_after_ampersand: &[u16
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        get_error_for_numeric_character_reference, is_ascii_alpha_numeric, is_ascii_digit,
-        is_ascii_letter, is_ascii_lower, is_ascii_upper, is_script_data_double_escape_sequence_end,
-        is_whitespace, to_ascii_lower, State, Tokenizer, TokenizerMode, TokenizerOptions,
-    };
-    use crate::common::error_codes::ErrorCode;
-    use crate::common::token::{Token, TokenType};
-    use crate::common::unicode::code_points as cp;
-
-    #[test]
-    fn state_discriminants_follow_reference_order() {
-        assert_eq!(State::Data as u8, 0);
-        assert_eq!(State::RcData as u8, 1);
-        assert_eq!(State::PlainText as u8, 4);
-        assert_eq!(State::TagOpen as u8, 5);
-        assert_eq!(State::BeforeAttributeName as u8, 31);
-        assert_eq!(State::Doctype as u8, 52);
-        assert_eq!(State::CDataSection as u8, 68);
-        assert_eq!(State::AmbiguousAmpersand as u8, 72);
-    }
-
-    #[test]
-    fn tokenizer_modes_map_to_initial_states() {
-        assert_eq!(TokenizerMode::Data.state(), State::Data);
-        assert_eq!(TokenizerMode::RcData.state(), State::RcData);
-        assert_eq!(TokenizerMode::RawText.state(), State::RawText);
-        assert_eq!(TokenizerMode::ScriptData.state(), State::ScriptData);
-        assert_eq!(TokenizerMode::PlainText.state(), State::PlainText);
-        assert_eq!(TokenizerMode::CDataSection.state(), State::CDataSection);
-    }
-
-    #[test]
-    fn ascii_helpers_match_parse5_predicates() {
-        assert!(is_ascii_digit('0' as i32));
-        assert!(is_ascii_digit('9' as i32));
-        assert!(!is_ascii_digit('/' as i32));
-        assert!(is_ascii_upper('A' as i32));
-        assert!(is_ascii_upper('Z' as i32));
-        assert!(is_ascii_lower('a' as i32));
-        assert!(is_ascii_lower('z' as i32));
-        assert!(is_ascii_letter('Q' as i32));
-        assert!(is_ascii_alpha_numeric('7' as i32));
-        assert_eq!(to_ascii_lower('A' as i32), 'a' as i32);
-    }
-
-    #[test]
-    fn whitespace_and_script_escape_helpers_match_reference() {
-        assert!(is_whitespace(cp::SPACE));
-        assert!(is_whitespace(cp::LINE_FEED));
-        assert!(is_whitespace(cp::TABULATION));
-        assert!(is_whitespace(cp::FORM_FEED));
-        assert!(!is_whitespace(cp::CARRIAGE_RETURN));
-        assert!(is_script_data_double_escape_sequence_end(cp::SOLIDUS));
-        assert!(is_script_data_double_escape_sequence_end(
-            cp::GREATER_THAN_SIGN
-        ));
-        assert!(!is_script_data_double_escape_sequence_end('x' as i32));
-    }
-
-    #[test]
-    fn numeric_character_reference_errors_match_parse5_order() {
-        assert_eq!(
-            get_error_for_numeric_character_reference(0),
-            Some(ErrorCode::NullCharacterReference)
-        );
-        assert_eq!(
-            get_error_for_numeric_character_reference(0x110000),
-            Some(ErrorCode::CharacterReferenceOutsideUnicodeRange)
-        );
-        assert_eq!(
-            get_error_for_numeric_character_reference(0xd800),
-            Some(ErrorCode::SurrogateCharacterReference)
-        );
-        assert_eq!(
-            get_error_for_numeric_character_reference(0xfdd0),
-            Some(ErrorCode::NoncharacterCharacterReference)
-        );
-        assert_eq!(
-            get_error_for_numeric_character_reference(0x0001),
-            Some(ErrorCode::ControlCharacterReference)
-        );
-        assert_eq!(
-            get_error_for_numeric_character_reference(cp::CARRIAGE_RETURN as u32),
-            Some(ErrorCode::ControlCharacterReference)
-        );
-        assert_eq!(get_error_for_numeric_character_reference('A' as u32), None);
-    }
-
-    #[test]
-    fn tokenizer_groups_character_tokens_and_emits_eof() {
-        let output = Tokenizer::tokenize("hi \n\u{0}x", TokenizerOptions::default());
-        let tokens: Vec<_> = output
-            .tokens
-            .iter()
-            .map(|token| match token {
-                Token::Character(token) => (token.token_type, token.chars.as_str()),
-                Token::Eof(_) => (TokenType::Eof, ""),
-                _ => panic!("unexpected token: {token:?}"),
-            })
-            .collect();
-
-        assert_eq!(
-            tokens,
-            vec![
-                (TokenType::Character, "hi"),
-                (TokenType::WhitespaceCharacter, " \n"),
-                (TokenType::NullCharacter, "\u{0}"),
-                (TokenType::Character, "x"),
-                (TokenType::Eof, ""),
-            ]
-        );
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::UnexpectedNullCharacter]
-        );
-    }
-
-    #[test]
-    fn tokenizer_emits_start_tags_with_attributes() {
-        let output = Tokenizer::tokenize(
-            "<DiV id=\"x\" disabled class=y />",
-            TokenizerOptions::default(),
-        );
-
-        let Token::Tag(token) = &output.tokens[0] else {
-            panic!("expected tag token");
-        };
-
-        assert_eq!(token.token_type, TokenType::StartTag);
-        assert_eq!(token.tag_name, "div");
-        assert!(token.self_closing);
-        assert_eq!(token.attr("id"), Some("x"));
-        assert_eq!(token.attr("disabled"), Some(""));
-        assert_eq!(token.attr("class"), Some("y"));
-        assert!(matches!(output.tokens[1], Token::Eof(_)));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_reports_end_tag_attributes_and_trailing_solidus() {
-        let output = Tokenizer::tokenize("</div class=x />", TokenizerOptions::default());
-
-        let Token::Tag(token) = &output.tokens[0] else {
-            panic!("expected tag token");
-        };
-
-        assert_eq!(token.token_type, TokenType::EndTag);
-        assert_eq!(token.tag_name, "div");
-        assert_eq!(token.attr("class"), Some("x"));
-        assert!(token.self_closing);
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![
-                ErrorCode::EndTagWithAttributes,
-                ErrorCode::EndTagWithTrailingSolidus
-            ]
-        );
-    }
-
-    #[test]
-    fn tokenizer_emits_comments_and_bogus_comments() {
-        let output = Tokenizer::tokenize("<!-- Test --><?x>", TokenizerOptions::default());
-
-        let Token::Comment(comment) = &output.tokens[0] else {
-            panic!("expected comment token");
-        };
-        assert_eq!(comment.data, " Test ");
-
-        let Token::Comment(bogus) = &output.tokens[1] else {
-            panic!("expected bogus comment token");
-        };
-        assert_eq!(bogus.data, "?x");
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::UnexpectedQuestionMarkInsteadOfTagName]
-        );
-    }
-
-    #[test]
-    fn tokenizer_emits_doctype_public_and_system_ids() {
-        let output = Tokenizer::tokenize(
-            "<!DOCTYPE html PUBLIC \"pub\" \"sys\">",
-            TokenizerOptions::default(),
-        );
-
-        let Token::Doctype(doctype) = &output.tokens[0] else {
-            panic!("expected doctype token");
-        };
-
-        assert_eq!(doctype.name.as_deref(), Some("html"));
-        assert_eq!(doctype.public_id.as_deref(), Some("pub"));
-        assert_eq!(doctype.system_id.as_deref(), Some("sys"));
-        assert!(!doctype.force_quirks);
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_handles_rawtext_end_tags_for_last_start_tag_name() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::RawText;
-        tokenizer.last_start_tag_name = "style".to_string();
-        tokenizer.write("a</style>b", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(&output.tokens[0], Token::Character(token) if token.chars == "a"));
-        assert!(
-            matches!(&output.tokens[1], Token::Tag(token) if token.token_type == TokenType::EndTag && token.tag_name == "style")
-        );
-        assert!(matches!(&output.tokens[2], Token::Character(token) if token.chars == "b"));
-        assert!(matches!(output.tokens[3], Token::Eof(_)));
-    }
-
-    #[test]
-    fn tokenizer_hibernates_inside_special_end_tag_delimiter_like_upstream() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::RcData;
-        tokenizer.last_start_tag_name = "title".to_string();
-        tokenizer.write("abc</title", false);
-        tokenizer.write("><p>x", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(&output.tokens[0], Token::Character(token) if token.chars == "abc"));
-        assert!(
-            matches!(&output.tokens[1], Token::Tag(token) if token.token_type == TokenType::EndTag && token.tag_name == "title")
-        );
-        assert!(
-            matches!(&output.tokens[2], Token::Tag(token) if token.token_type == TokenType::StartTag && token.tag_name == "p")
-        );
-        assert!(matches!(&output.tokens[3], Token::Character(token) if token.chars == "x"));
-        assert!(matches!(output.tokens[4], Token::Eof(_)));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_handles_script_comment_like_escaped_text() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::ScriptData;
-        tokenizer.last_start_tag_name = "script".to_string();
-        tokenizer.write("<!--x--></script>z", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(&output.tokens[0], Token::Character(token) if token.chars == "<!--x-->"));
-        assert!(
-            matches!(&output.tokens[1], Token::Tag(token) if token.token_type == TokenType::EndTag && token.tag_name == "script")
-        );
-        assert!(matches!(&output.tokens[2], Token::Character(token) if token.chars == "z"));
-        assert!(matches!(output.tokens[3], Token::Eof(_)));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_reports_script_comment_like_eof() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::ScriptData;
-        tokenizer.write("<!--x", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "<!--x"
-        ));
-        assert!(matches!(output.tokens[1], Token::Eof(_)));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::EofInScriptHtmlCommentLikeText]
-        );
-    }
-
-    #[test]
-    fn tokenizer_replaces_null_in_script_comment_like_text() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::ScriptData;
-        tokenizer.write("<!--\0-->", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "<!--\u{fffd}-->"
-        ));
-        assert!(matches!(output.tokens[1], Token::Eof(_)));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::UnexpectedNullCharacter]
-        );
-    }
-
-    #[test]
-    fn tokenizer_keeps_inner_script_end_tag_text_while_double_escaped() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::ScriptData;
-        tokenizer.last_start_tag_name = "script".to_string();
-        tokenizer.write("<!--<script>var x='</script>';</script>tail", true);
-        let output = tokenizer.finish();
-
-        let leading_text = output
-            .tokens
-            .iter()
-            .take_while(|token| matches!(token, Token::Character(_)))
-            .fold(String::new(), |mut text, token| {
-                if let Token::Character(token) = token {
-                    text.push_str(&token.chars);
-                }
-
-                text
-            });
-
-        assert_eq!(leading_text, "<!--<script>var x='</script>';");
-        assert!(
-            matches!(&output.tokens[3], Token::Tag(token) if token.token_type == TokenType::EndTag && token.tag_name == "script")
-        );
-        assert!(matches!(
-            &output.tokens[4],
-            Token::Character(token) if token.chars == "tail"
-        ));
-        assert!(matches!(output.tokens[5], Token::Eof(_)));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_reports_eof_in_script_double_escaped_text() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-        tokenizer.state = State::ScriptData;
-        tokenizer.write("<!--<script>", true);
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "<!--<script>"
-        ));
-        assert!(matches!(output.tokens[1], Token::Eof(_)));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::EofInScriptHtmlCommentLikeText]
-        );
-    }
-
-    #[test]
-    fn tokenizer_records_basic_tag_locations() {
-        let output = Tokenizer::tokenize(
-            "<div id=\"x\">",
-            TokenizerOptions {
-                source_code_location_info: true,
-            },
-        );
-
-        let Token::Tag(token) = &output.tokens[0] else {
-            panic!("expected tag token");
-        };
-        let location = token.location.as_ref().unwrap();
-
-        assert_eq!(location.location.start_offset, 0);
-        assert_eq!(location.location.end_offset, 12);
-        assert!(location.attrs.contains_key("id"));
-    }
-
-    #[test]
-    fn tokenizer_decodes_named_character_references_in_text() {
-        let output =
-            Tokenizer::tokenize("a&amp;b&nbsp;&notin;&notit;", TokenizerOptions::default());
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "a&b\u{a0}∉¬it;"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::MissingSemicolonAfterCharacterReference]
-        );
-    }
-
-    #[test]
-    fn tokenizer_hibernates_inside_named_character_references_like_upstream() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-
-        tokenizer.write("a&nb", false);
-        tokenizer.write("sp;b&nbsp", false);
-        tokenizer.write(";c", true);
-
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "a\u{a0}b\u{a0}c"
-        ));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_blocks_legacy_named_references_in_attributes() {
-        let output =
-            Tokenizer::tokenize("<a href=\"a&amp;b&notit;\">", TokenizerOptions::default());
-
-        let Token::Tag(token) = &output.tokens[0] else {
-            panic!("expected tag token");
-        };
-
-        assert_eq!(token.attr("href"), Some("a&b&notit;"));
-        assert!(output.errors.is_empty());
-    }
-
-    #[test]
-    fn tokenizer_reports_unknown_named_character_references() {
-        let output = Tokenizer::tokenize("&bogus;", TokenizerOptions::default());
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "&bogus;"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::UnknownNamedCharacterReference]
-        );
-    }
-
-    #[test]
-    fn tokenizer_keeps_ambiguous_ampersand_state_across_chunks_like_upstream() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-
-        tokenizer.write("&bog", false);
-        tokenizer.write("us", false);
-        tokenizer.write(";", true);
-
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "&bogus;"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::UnknownNamedCharacterReference]
-        );
-    }
-
-    #[test]
-    fn tokenizer_decodes_numeric_character_references() {
-        let output = Tokenizer::tokenize(
-            "&#65&#x41;&#x80;&#0;&#x110000;",
-            TokenizerOptions::default(),
-        );
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "AA€��"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![
-                ErrorCode::MissingSemicolonAfterCharacterReference,
-                ErrorCode::ControlCharacterReference,
-                ErrorCode::NullCharacterReference,
-                ErrorCode::CharacterReferenceOutsideUnicodeRange,
-            ]
-        );
-    }
-
-    #[test]
-    fn tokenizer_hibernates_inside_numeric_character_references_like_upstream() {
-        let mut tokenizer = Tokenizer::new(TokenizerOptions::default());
-
-        tokenizer.write("&#x", false);
-        tokenizer.write("41;&#160", false);
-        tokenizer.write("x", true);
-
-        let output = tokenizer.finish();
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "A\u{a0}x"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![ErrorCode::MissingSemicolonAfterCharacterReference]
-        );
-    }
-
-    #[test]
-    fn tokenizer_reports_absence_of_numeric_reference_digits() {
-        let output = Tokenizer::tokenize("&#x; &#;", TokenizerOptions::default());
-
-        assert!(matches!(
-            &output.tokens[0],
-            Token::Character(token) if token.chars == "&#x;"
-        ));
-        assert!(matches!(
-            &output.tokens[1],
-            Token::Character(token) if token.token_type == TokenType::WhitespaceCharacter && token.chars == " "
-        ));
-        assert!(matches!(
-            &output.tokens[2],
-            Token::Character(token) if token.chars == "&#;"
-        ));
-        assert_eq!(
-            output.errors.iter().map(|err| err.code).collect::<Vec<_>>(),
-            vec![
-                ErrorCode::AbsenceOfDigitsInNumericCharacterReference,
-                ErrorCode::AbsenceOfDigitsInNumericCharacterReference,
-            ]
-        );
-    }
-}
+mod tests;

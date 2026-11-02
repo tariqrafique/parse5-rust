@@ -30,8 +30,8 @@ The module layout mirrors upstream `packages/parse5/lib`, so a Rust file and its
 | Module | Upstream | Role |
 |---|---|---|
 | `tokenizer/preprocessor.rs` | `tokenizer/preprocessor.ts` | Input buffer as UTF-16 code units; CR/LF normalization, surrogate handling, line/column tracking, chunked input, dropping parsed chunks |
-| `tokenizer/mod.rs` | `tokenizer/index.ts` | The HTML tokenizer state machine (73 states) and character references |
-| `parser/mod.rs` | `parser/index.ts` | Tree construction: insertion modes, adoption agency, foster parenting, templates, fragment parsing, location bookkeeping |
+| `tokenizer/mod.rs` plus `tokenizer/states/*.rs` and `tokenizer/char_ref.rs` | `tokenizer/index.ts` | The HTML tokenizer state machine (73 states) and character references. States are split by family; names match upstream |
+| `parser/mod.rs` plus `parser/modes/*.rs`, `adoption_agency.rs`, `foster_parenting.rs`, `foreign.rs`, `stack.rs`, `location.rs` | `parser/index.ts` | Tree construction: insertion modes, adoption agency, foster parenting, templates, fragment parsing, location bookkeeping. Mode handlers live in the sibling files and are still methods on `Parser` |
 | `parser/open_element_stack.rs` | `parser/open-element-stack.ts` | Stack of open elements with scope queries |
 | `parser/formatting_element_list.rs` | `parser/formatting-element-list.ts` | Active formatting elements, markers, Noah's Ark clause |
 | `serializer/mod.rs` | `serializer/index.ts` | HTML serialization (`serialize`, `serialize_outer`) |
