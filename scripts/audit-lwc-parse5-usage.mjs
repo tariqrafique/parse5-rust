@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ErrorCodes } from '../packages/parse5/src/index.js';
-
 const root = path.resolve(import.meta.dirname, '..');
 const lwcRoot = path.join(root, 'reference', 'lwc');
+
+if (!fs.existsSync(lwcRoot)) {
+  console.log('skipped: run `npm run setup:reference` (reference/lwc is missing)');
+  process.exit(0);
+}
 
 function read(file) {
   return fs.readFileSync(file, 'utf8');
@@ -31,8 +34,6 @@ function walk(dir, predicate, out = []) {
   }
   return out;
 }
-
-assert(fs.existsSync(lwcRoot), 'reference/lwc is missing; run ./scripts/setup-reference.sh');
 
 const packageJsons = walk(
   lwcRoot,
@@ -93,6 +94,7 @@ assert(
   `LWC now imports parse5 sibling packages: ${JSON.stringify(importedSiblingPackages, null, 2)}`
 );
 
+const { ErrorCodes } = await import('../packages/parse5/src/index.js');
 const parse5ErrorCodes = Object.values(ErrorCodes);
 
 const lwcParse5Errors = read(path.join(lwcRoot, 'packages', '@lwc', 'template-compiler', 'src', 'parser', 'parse5Errors.ts'));

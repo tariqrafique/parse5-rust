@@ -7,7 +7,7 @@ use parse5::tokenizer::{State, Tokenizer, TokenizerOptions};
 use parse5::tree_adapters::default::{append_child, create_element, NodeData, NodeRef};
 use parse5::{
     parse, parse_fragment, parse_fragment_with_context, parse_fragment_with_context_and_errors,
-    parse_fragment_with_errors, parse_with_errors, ParserOptions, SerializerOptions,
+    parse_fragment_with_errors, parse_with_errors, serialize, ParserOptions, SerializerOptions,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -665,5 +665,17 @@ pub fn parse_fragment_with_context_and_errors_js(
 #[wasm_bindgen(js_name = parseFragmentAndSerialize)]
 pub fn parse_fragment_and_serialize(html: &str) -> String {
     let fragment = parse_fragment(html, ParserOptions::default());
-    parse5::serialize(&fragment, SerializerOptions::default())
+    serialize(&fragment, SerializerOptions::default())
+}
+
+/// Document `parse` + Rust `serialize`, for the offline serializer parity test.
+/// Not re-exported by the parse5 npm facade.
+#[wasm_bindgen(js_name = parseAndSerialize)]
+pub fn parse_and_serialize(html: &str, scripting_enabled: bool) -> String {
+    let parser_options = ParserOptions {
+        scripting_enabled,
+        source_code_location_info: false,
+    };
+    let serializer_options = SerializerOptions { scripting_enabled };
+    serialize(&parse(html, parser_options), serializer_options)
 }

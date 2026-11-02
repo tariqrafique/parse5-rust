@@ -20,6 +20,11 @@ await port.initParse5Wasm();
 const raw = await import(pathToFileURL(path.join(root, 'packages/parse5-wasm/pkg/parse5_wasm.js')).href);
 
 const referencePath = path.join(root, 'reference/parse5/packages/parse5/dist/index.js');
+if (!fs.existsSync(referencePath)) {
+  console.log(
+    'upstream comparison skipped: run `npm run setup:reference` (reference/parse5 is not built)'
+  );
+}
 const upstream = fs.existsSync(referencePath) ? await import(pathToFileURL(referencePath).href) : null;
 
 function time(fn, { warmup = 5, iterations = 30 } = {}) {

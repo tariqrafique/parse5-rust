@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
+const referenceEntry = path.join(root, 'reference', 'parse5', 'packages', 'parse5', 'dist', 'index.js');
 
-const reference = await import(
-  pathToFileURL(path.join(root, 'reference', 'parse5', 'packages', 'parse5', 'dist', 'index.js')).href
-);
+if (!fs.existsSync(referenceEntry)) {
+  console.log('skipped: run `npm run setup:reference` (reference/parse5 is not built)');
+  process.exit(0);
+}
+
+const reference = await import(pathToFileURL(referenceEntry).href);
 const port = await import(pathToFileURL(path.join(root, 'packages', 'parse5-wasm', 'src', 'index.js')).href);
 
 await port.initParse5Wasm();

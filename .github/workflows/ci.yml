@@ -1,0 +1,40 @@
+name: CI
+# Manual only. This repository does not have GitHub Actions credits, so pull
+# requests and pushes do not start runners. The local gate is ./scripts/check.sh
+# and ./scripts/check-wasm.sh. Run this workflow by hand when credits are available.
+# Hosted runners are pinned to ubuntu-24.04. ubuntu-latest is moving to 26.04 through November 2026.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Rust check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: ./scripts/check.sh
+
+  check-wasm:
+    name: wasm check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-bindgen-cli from Cargo.lock
+        run: |
+          version="$(node scripts/wasm-bindgen-version.mjs)"
+          cargo install wasm-bindgen-cli --version "$version" --locked
+      - run: ./scripts/check-wasm.sh

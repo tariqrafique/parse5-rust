@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -36,6 +37,18 @@ function readJson(file) {
 
 assert(fs.existsSync(serializationFixture), 'parse5 serialization fixture is missing');
 assert(fs.existsSync(treeConstructionDir), 'parse5 parser-feedback fixture directory is missing');
+
+const namedEntities = [
+  'html5lib-tests/tokenizer/namedEntities.test',
+  'html5lib-tests-fork/tokenizer/namedEntities.test',
+].map((relative) => path.join(root, 'fixtures/parse5/test/data', relative));
+const namedEntityHashes = namedEntities.map((file) =>
+  createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+);
+assert(
+  namedEntityHashes[0] === namedEntityHashes[1],
+  'namedEntities.test copies diverged; they are vendored twice and must stay byte-identical'
+);
 
 const serializationTests = readJson(serializationFixture);
 const parserFeedbackTests = fs
