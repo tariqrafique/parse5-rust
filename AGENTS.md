@@ -1,51 +1,45 @@
-# Repository Notes
+# Agent runbook
 
-This repository is for a Rust/wasm port of `parse5`, with upstream JavaScript projects checked out locally for reference and compatibility testing.
+Rust/wasm port of parse5. Compatibility target is `parse5@8.0.1`, especially `parseFragment`, default tree nodes, `sourceCodeLocationInfo`, and `onParseError` for `@lwc/template-compiler`. Details: `docs/lwc-parse5-requirements.md` and `docs/architecture.md`.
 
-## Vendored Fixtures
+## Commands (repo root)
 
-The self-contained test fixtures live under `fixtures/parse5/test/data`. These are checked-in copies of upstream parse5 test data and are the source of truth for normal `cargo test` and npm package tests.
+| Command | What it does | Warm time |
+|---|---|---|
+| `cargo test` | Rust suite against `fixtures/` | ~3s |
+| `cargo test --test html5lib_tree_construction` | One integration suite | ~1s |
+| `cargo test --test attr_location_spans` | Attribute span cases | <1s |
+| `./scripts/check.sh` or `just check` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, reference guard | ~10s |
+| `./scripts/check-wasm.sh` or `just check-wasm` | wasm-bindgen version, `npm run build:wasm`, `npm test` | ~16s after the first wasm build |
+| `npm test` | Offline package suite. Needs a built wasm package. Does not need `reference/` | ~4s |
+| `npm run setup:reference && npm run test:parity` | Optional upstream and LWC comparison | network + a built reference checkout |
 
-Do not make tests depend on `reference/parse5/test/data`; `reference/parse5` is for reading upstream source and deliberately refreshing the vendored fixture copy.
+`wasm-bindgen-cli` must match the `wasm-bindgen` version in `Cargo.lock`. `./scripts/check-wasm.sh` prints the install command when it does not.
 
-## Reference Sources
+## Where to look
 
-Reference repositories live under `reference/` and are intentionally treated as external source checkouts, not code to edit as part of this port:
+- Upstream file map: the table in `docs/architecture.md` (`parser/mod.rs` ↔ `parser/index.ts`, and the rest).
+- Do not read or grep `fixtures/` wholesale. It is about 7.8 MB. `namedEntities.test` is 1.1 MB and vendored twice (the copies are byte-identical; `npm run test:fixtures` checks that). Use `rg -g '!fixtures'`.
+- Offsets are UTF-16 code units everywhere (errors and `sourceCodeLocation`).
+- The parser does not use the `TreeAdapter` trait. Call the free functions in `tree_adapters::default`.
+- Tag, namespace, foreign-content, and error-code tables exist in both `crates/parse5/src/common/*.rs` and `packages/parse5-wasm/src/index.js`. Change both. `cargo test --test js_table_parity` fails if they diverge.
+- The Rust serializer (`crates/parse5/src/serializer`) and the JS serializer (`packages/parse5-wasm/src/index.js`) are both checked against `fixtures/parse5/test/data/serialization/tests.json` by `npm run test:serializer-parity`.
 
-- `reference/parse5`: upstream `parse5` source from `https://github.com/inikulin/parse5.git`
-- `reference/lwc`: upstream LWC source from `https://github.com/salesforce/lwc.git`
+## Adding a behavior fix
 
-Set them up with:
+1. Take the expected value from parse5 8.0.1. `scripts/attr-span-reference.mjs` reads `PARSE5_PATH` or `reference/parse5/packages/parse5`.
+2. Add a failing case under `crates/parse5/tests/`, commit, then fix.
 
-```sh
-./scripts/setup-reference.sh
-```
+## Rules and what enforces them
 
-The setup script clones missing repositories only. If a reference checkout already exists, it prints the current branch and commit and leaves it alone. It also initializes the parse5 html5lib fixture submodules so vendored fixtures can be refreshed deliberately when needed.
+| Rule | Enforced by |
+|---|---|
+| Default tests do not mention `reference/` | `scripts/check-no-reference.mjs` in `./scripts/check.sh`, `npm test`, and CI |
+| fmt and clippy are clean | `./scripts/check.sh` and `.github/workflows/ci.yml`; `[workspace.lints]` denies unused Rust lints and `clippy::all` |
+| Rust and JS tag, namespace, foreign-content, and error-code tables match | `cargo test --test js_table_parity` (`npm run test:tables-parity`) |
+| Rust and JS serializers agree on the serialization fixture | `npm run test:serializer-parity` |
+| `namedEntities.test` copies stay byte-identical | `npm run test:fixtures` |
+| Do not edit `reference/` | `.gitignore` (`reference/` is untracked) |
+| CI runs the same commands as local | `.github/workflows/ci.yml` calls `./scripts/check.sh` and `./scripts/check-wasm.sh` |
 
-To use a different branch or tag for a fresh clone:
-
-```sh
-PARSE5_REF=master LWC_REF=master ./scripts/setup-reference.sh
-```
-
-## Compatibility Target
-
-The first compatibility target is `parse5@8.0.1`, especially the API surface used by `@lwc/template-compiler`:
-
-- `parseFragment`
-- default tree adapter node shapes and type guards
-- `sourceCodeLocationInfo`
-- `onParseError` with parse5-compatible error codes and locations
-
-LWC's direct parse5-related package surface is `parse5` plus `@parse5/tools`. Do not treat parse5 sibling packages such as `parse5-parser-stream`, `parse5-sax-parser`, or `parse5-html-rewriting-stream` as LWC requirements unless the LWC audit changes.
-
-Current LWC keeps `parse5` and `@parse5/tools` in `devDependencies` and bundles their relevant code into `@lwc/template-compiler/dist`. For final validation, rebuild or alias LWC source against the wasm-backed parse5 package rather than only swapping a runtime dependency in the published package.
-
-See `docs/lwc-parse5-requirements.md` for the detailed must-port API surface and LWC call sites.
-
-## Working Rules
-
-- Do not edit files under `reference/` unless explicitly asked.
-- Prefer adding focused Rust/wasm implementation and tests in this repo root.
-- Use checked-in fixtures for normal parse5 test runs. Use the upstream reference checkout and LWC template compiler fixtures as external compatibility checks.
+Do not edit files under `reference/` unless explicitly asked. Normal tests use `fixtures/parse5/test/data`.

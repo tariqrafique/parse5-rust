@@ -50,11 +50,11 @@ If Rust was just installed, reload your shell environment first:
 . "$HOME/.cargo/env"
 ```
 
-Install the wasm target and wasm-bindgen CLI if needed:
+Install the wasm target and wasm-bindgen CLI if needed. The CLI version has to match `wasm-bindgen` in `Cargo.lock` (`./scripts/check-wasm.sh` checks):
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli
+cargo install wasm-bindgen-cli --version "$(node scripts/wasm-bindgen-version.mjs)" --locked
 ```
 
 ## Build
@@ -69,30 +69,28 @@ This generates `packages/parse5-wasm/pkg/`, which is build output and is intenti
 
 ## Test
 
-Run the Rust test suite:
+Run the Rust gate (format, clippy, tests):
 
 ```sh
-cargo test
+./scripts/check.sh
 ```
 
-Run the npm package suite (requires a built wasm package, see Build):
+Run the wasm and npm gate (requires `wasm-bindgen-cli`, see Prerequisites):
 
 ```sh
-npm test
+./scripts/check-wasm.sh
 ```
 
-Run lint checks:
+`npm test` alone runs the offline package suite. It uses checked-in fixtures under `fixtures/parse5/test/data` and a built wasm package. It does not need `reference/`.
+
+Optional comparison against upstream parse5 and the LWC checkout:
 
 ```sh
-cargo clippy --all-targets --all-features -- -D warnings
+npm run setup:reference
+npm run test:parity
 ```
 
-These tests use checked-in fixtures under `fixtures/parse5/test/data`. The one exception is `npm run test:wasm-runtime` (the first step of `npm test`), which compares the port's exports and output against a built upstream parse5 at `reference/parse5/packages/parse5/dist`. To prepare it for the `parse5@8.0.1` compatibility target:
-
-```sh
-git clone --depth 1 --branch v8.0.1 https://github.com/inikulin/parse5.git reference/parse5
-(cd reference/parse5 && npm ci --ignore-scripts && npx tsc --build packages/parse5)
-```
+`test:parity` skips, and says so, when those checkouts are missing.
 
 ## Reference Checkouts
 

@@ -103,12 +103,11 @@ The sibling packages under `packages/` are thin JS ports of their upstream count
 
 | Suite | What it checks | Needs |
 |---|---|---|
-| `cargo test` | html5lib tree-construction (incl. error codes; parse5's 6 expected foreign-fragment failures must still fail), html5lib tokenizer, parse5 location-info and serialization fixtures, robustness | `fixtures/` only |
-| `npm test` | wasm facade, serialization goldens, typecheck, every sibling package, fixture inventory | a built wasm package |
-| `npm run test:wasm-runtime` (first step of `npm test`) | export surface and output parity against **upstream parse5** | built `reference/parse5` (see README) |
-| LWC integration | `@lwc/template-compiler` tests against the port | `reference/lwc` (see README) |
+| `./scripts/check.sh` | fmt, clippy `-D warnings`, `cargo test` (html5lib tree-construction including error codes and parse5's 6 expected foreign-fragment failures, tokenizer, location-info, serialization, robustness, Rust/JS table parity) | `fixtures/` only |
+| `npm test` | wasm facade, LWC-shaped `parseFragment` drive, serialization goldens, Rust-vs-JS serializer parity, typecheck, every sibling package, fixture inventory | a built wasm package |
+| `npm run test:parity` | export surface and output parity against upstream parse5, LWC usage audit, benchmark. Each step skips with a message when its checkout is missing | `reference/parse5` and, for the LWC audit, `reference/lwc` |
 
-Fixtures are vendored under `fixtures/parse5/test/data`. `reference/` holds upstream checkouts for reading and parity runs only, and tests must not depend on its fixture data.
+Fixtures are vendored under `fixtures/parse5/test/data`. `reference/` holds upstream checkouts for reading and parity runs only. `npm test` and `cargo test` do not import it; `scripts/check-no-reference.mjs` fails the build if a default test script starts to.
 
 ## Performance
 
