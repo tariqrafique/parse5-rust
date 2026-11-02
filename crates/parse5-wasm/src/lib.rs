@@ -16,7 +16,10 @@ use wasm_bindgen::prelude::*;
 
 mod node_json;
 
-use node_json::NodeJson;
+#[wasm_bindgen(start)]
+fn install_panic_hook() {
+    console_error_panic_hook::set_once();
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,20 +299,36 @@ fn to_js_value(value: &impl Serialize) -> Result<JsValue, JsValue> {
     let json = serde_json::to_string(value)
         .map_err(|err| JsValue::from_str(&format!("failed to convert parse5 value: {err}")))?;
 
-    js_sys::JSON::parse(&json)
+    parse_json(&json)
 }
 
-#[derive(Serialize)]
-struct ParseResult<'a> {
-    node: NodeJson<'a>,
-    errors: Vec<Value>,
+fn parse_json(json: &str) -> Result<JsValue, JsValue> {
+    js_sys::JSON::parse(json)
 }
 
-fn parse_result_value(document: &NodeRef, errors: Vec<parse5::ParserError>) -> ParseResult<'_> {
-    ParseResult {
-        node: NodeJson(document),
-        errors: errors.into_iter().map(parser_error_value).collect(),
-    }
+fn node_to_js(node: &NodeRef) -> Result<JsValue, JsValue> {
+    let mut json = String::new();
+    node_json::write_node_json(&mut json, node);
+    parse_json(&json)
+}
+
+fn parse_result_to_js(
+    document: &NodeRef,
+    errors: Vec<parse5::ParserError>,
+) -> Result<JsValue, JsValue> {
+    let errors = errors
+        .into_iter()
+        .map(parser_error_value)
+        .collect::<Vec<_>>();
+    let mut json = String::from("{\"node\":");
+    node_json::write_node_json(&mut json, document);
+    json.push_str(",\"errors\":");
+    json.push_str(
+        &serde_json::to_string(&errors)
+            .map_err(|err| JsValue::from_str(&format!("failed to convert parse5 errors: {err}")))?,
+    );
+    json.push('}');
+    parse_json(&json)
 }
 
 fn node_path(root: &NodeRef, node: &NodeRef) -> Option<Vec<Value>> {
@@ -486,13 +505,13 @@ impl WasmParser {
     }
 
     pub fn document(&self) -> Result<JsValue, JsValue> {
-        to_js_value(&NodeJson(&self.parser.document))
+        node_to_js(&self.parser.document)
     }
 
     #[wasm_bindgen(js_name = getFragment)]
     pub fn get_fragment(&mut self) -> Result<JsValue, JsValue> {
         let fragment = self.parser.get_fragment();
-        to_js_value(&NodeJson(&fragment))
+        node_to_js(&fragment)
     }
 
     pub fn stopped(&self) -> bool {
@@ -613,25 +632,25 @@ impl WasmTokenizer {
 #[wasm_bindgen(js_name = parse)]
 pub fn parse_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let document = parse(html, parser_options(options)?);
-    to_js_value(&NodeJson(&document))
+    node_to_js(&document)
 }
 
 #[wasm_bindgen(js_name = parseWithErrors)]
 pub fn parse_with_errors_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let output = parse_with_errors(html, parser_options(options)?);
-    to_js_value(&parse_result_value(&output.document, output.errors))
+    parse_result_to_js(&output.document, output.errors)
 }
 
 #[wasm_bindgen(js_name = parseFragment)]
 pub fn parse_fragment_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let fragment = parse_fragment(html, parser_options(options)?);
-    to_js_value(&NodeJson(&fragment))
+    node_to_js(&fragment)
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithErrors)]
 pub fn parse_fragment_with_errors_js(html: &str, options: JsValue) -> Result<JsValue, JsValue> {
     let output = parse_fragment_with_errors(html, parser_options(options)?);
-    to_js_value(&parse_result_value(&output.document, output.errors))
+    parse_result_to_js(&output.document, output.errors)
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithContext)]
@@ -645,7 +664,7 @@ pub fn parse_fragment_with_context_js(
         html,
         parser_options(options)?,
     );
-    to_js_value(&NodeJson(&fragment))
+    node_to_js(&fragment)
 }
 
 #[wasm_bindgen(js_name = parseFragmentWithContextAndErrors)]
@@ -659,7 +678,7 @@ pub fn parse_fragment_with_context_and_errors_js(
         html,
         parser_options(options)?,
     );
-    to_js_value(&parse_result_value(&output.document, output.errors))
+    parse_result_to_js(&output.document, output.errors)
 }
 
 #[wasm_bindgen(js_name = parseFragmentAndSerialize)]

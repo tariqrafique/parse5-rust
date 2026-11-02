@@ -841,18 +841,29 @@ function attachParentLinks(node, parentNode = null) {
     return node;
   }
 
-  if ('parentNode' in node) {
-    node.parentNode = parentNode;
-  }
+  const stack = [{ node, parentNode }];
 
-  if (Array.isArray(node.childNodes)) {
-    for (const child of node.childNodes) {
-      attachParentLinks(child, node);
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const currentNode = current.node;
+
+    if (!currentNode || typeof currentNode !== 'object') {
+      continue;
     }
-  }
 
-  if (node.nodeName === 'template' && node.namespaceURI === NS.HTML && node.content) {
-    attachParentLinks(node.content, null);
+    if ('parentNode' in currentNode) {
+      currentNode.parentNode = current.parentNode;
+    }
+
+    if (currentNode.nodeName === 'template' && currentNode.namespaceURI === NS.HTML && currentNode.content) {
+      stack.push({ node: currentNode.content, parentNode: null });
+    }
+
+    if (Array.isArray(currentNode.childNodes)) {
+      for (let index = currentNode.childNodes.length - 1; index >= 0; index -= 1) {
+        stack.push({ node: currentNode.childNodes[index], parentNode: currentNode });
+      }
+    }
   }
 
   return node;
@@ -919,71 +930,90 @@ function transformDocumentType(adapter, parentNode, sourceNode, pathMap, path) {
   return doctype ?? null;
 }
 
-function appendTransformedChild(adapter, parentNode, sourceNode, pathMap, path) {
-  if (sourceNode.nodeName === '#documentType') {
-    transformDocumentType(adapter, parentNode, sourceNode, pathMap, path);
-    return;
-  }
-
-  adapter.appendChild(parentNode, transformDefaultTreeNode(adapter, sourceNode, null, path, pathMap));
-}
-
-function transformDefaultTreeNode(adapter, sourceNode, targetDocument = null, path = [], pathMap = new Map()) {
+function createAdaptedShell(adapter, sourceNode, targetDocument) {
   switch (sourceNode.nodeName) {
     case '#document': {
       const document = targetDocument ?? adapter.createDocument();
-      pathMap.set(pathKey(path), document);
       adapter.setDocumentMode(document, sourceNode.mode);
-
-      for (const [idx, child] of (sourceNode.childNodes ?? []).entries()) {
-        appendTransformedChild(adapter, document, child, pathMap, [...path, idx]);
-      }
-
-      setAdaptedSourceCodeLocation(adapter, document, sourceNode);
       return document;
     }
-    case '#document-fragment': {
-      const fragment = adapter.createDocumentFragment();
-      pathMap.set(pathKey(path), fragment);
-
-      for (const [idx, child] of (sourceNode.childNodes ?? []).entries()) {
-        appendTransformedChild(adapter, fragment, child, pathMap, [...path, idx]);
-      }
-
-      setAdaptedSourceCodeLocation(adapter, fragment, sourceNode);
-      return fragment;
-    }
-    case '#comment': {
-      const comment = adapter.createCommentNode(sourceNode.data);
-      pathMap.set(pathKey(path), comment);
-      setAdaptedSourceCodeLocation(adapter, comment, sourceNode);
-      return comment;
-    }
-    case '#text': {
-      const text = adapter.createTextNode(sourceNode.value);
-      pathMap.set(pathKey(path), text);
-      setAdaptedSourceCodeLocation(adapter, text, sourceNode);
-      return text;
-    }
-    default: {
-      const element = adapter.createElement(sourceNode.tagName, sourceNode.namespaceURI, cloneAttributes(sourceNode.attrs));
-      pathMap.set(pathKey(path), element);
-
-      if (sourceNode.nodeName === 'template' && sourceNode.namespaceURI === NS.HTML && sourceNode.content) {
-        adapter.setTemplateContent(
-          element,
-          transformDefaultTreeNode(adapter, sourceNode.content, null, [...path, 'content'], pathMap)
-        );
-      }
-
-      for (const [idx, child] of (sourceNode.childNodes ?? []).entries()) {
-        appendTransformedChild(adapter, element, child, pathMap, [...path, idx]);
-      }
-
-      setAdaptedSourceCodeLocation(adapter, element, sourceNode);
-      return element;
-    }
+    case '#document-fragment':
+      return adapter.createDocumentFragment();
+    case '#comment':
+      return adapter.createCommentNode(sourceNode.data);
+    case '#text':
+      return adapter.createTextNode(sourceNode.value);
+    default:
+      return adapter.createElement(sourceNode.tagName, sourceNode.namespaceURI, cloneAttributes(sourceNode.attrs));
   }
+}
+
+function transformDefaultTreeNode(adapter, sourceNode, targetDocument = null, path = [], pathMap = new Map()) {
+  const root = createAdaptedShell(adapter, sourceNode, targetDocument);
+  pathMap.set(pathKey(path), root);
+  const stack = [{
+    source: sourceNode,
+    created: root,
+    path,
+    childIndex: 0,
+    contentDone: false,
+  }];
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+
+    if (
+      !frame.contentDone &&
+      frame.source.nodeName === 'template' &&
+      frame.source.namespaceURI === NS.HTML &&
+      frame.source.content
+    ) {
+      frame.contentDone = true;
+      const contentPath = [...frame.path, 'content'];
+      const content = createAdaptedShell(adapter, frame.source.content, null);
+      pathMap.set(pathKey(contentPath), content);
+      adapter.setTemplateContent(frame.created, content);
+      stack.push({
+        source: frame.source.content,
+        created: content,
+        path: contentPath,
+        childIndex: 0,
+        contentDone: false,
+      });
+      continue;
+    }
+
+    const children = frame.source.childNodes ?? [];
+
+    if (frame.childIndex < children.length) {
+      const idx = frame.childIndex;
+      const child = children[idx];
+      const childPath = [...frame.path, idx];
+      frame.childIndex += 1;
+
+      if (child.nodeName === '#documentType') {
+        transformDocumentType(adapter, frame.created, child, pathMap, childPath);
+        continue;
+      }
+
+      const createdChild = createAdaptedShell(adapter, child, null);
+      pathMap.set(pathKey(childPath), createdChild);
+      adapter.appendChild(frame.created, createdChild);
+      stack.push({
+        source: child,
+        created: createdChild,
+        path: childPath,
+        childIndex: 0,
+        contentDone: false,
+      });
+      continue;
+    }
+
+    setAdaptedSourceCodeLocation(adapter, frame.created, frame.source);
+    stack.pop();
+  }
+
+  return root;
 }
 
 function adaptParsedResult(node, options, targetDocument = null) {
