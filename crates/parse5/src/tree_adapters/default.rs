@@ -1,17 +1,11 @@
 use crate::common::html::{DocumentMode, NS_HTML};
 use crate::common::token::{Attribute, ElementLocation};
-use crate::tree_adapters::interface::TreeAdapter;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 pub use crate::common::html::DocumentMode as DefaultDocumentMode;
 
 pub type NodeRef = Rc<RefCell<Node>>;
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DefaultTreeAdapter;
-
-pub const DEFAULT_TREE_ADAPTER: DefaultTreeAdapter = DefaultTreeAdapter;
 
 #[derive(Debug)]
 pub struct Node {
@@ -564,183 +558,6 @@ pub fn update_node_source_code_location(node: &NodeRef, end_location: ElementLoc
     node_ref.source_code_location = Some(location);
 }
 
-impl TreeAdapter for DefaultTreeAdapter {
-    type Node = NodeRef;
-    type ParentNode = NodeRef;
-    type ChildNode = NodeRef;
-    type Document = NodeRef;
-    type DocumentFragment = NodeRef;
-    type Element = NodeRef;
-    type CommentNode = NodeRef;
-    type TextNode = NodeRef;
-    type Template = NodeRef;
-    type DocumentType = NodeRef;
-
-    fn adopt_attributes(&self, recipient: &Self::Element, attrs: Vec<Attribute>) {
-        adopt_attributes(recipient, attrs);
-    }
-
-    fn append_child(&self, parent_node: &Self::ParentNode, new_node: Self::ChildNode) {
-        append_child(parent_node, new_node);
-    }
-
-    fn create_comment_node(&self, data: &str) -> Self::CommentNode {
-        create_comment_node(data)
-    }
-
-    fn create_text_node(&self, value: &str) -> Self::TextNode {
-        create_text_node(value)
-    }
-
-    fn create_document(&self) -> Self::Document {
-        create_document()
-    }
-
-    fn create_document_fragment(&self) -> Self::DocumentFragment {
-        create_document_fragment()
-    }
-
-    fn create_element(
-        &self,
-        tag_name: &str,
-        namespace_uri: &str,
-        attrs: Vec<Attribute>,
-    ) -> Self::Element {
-        create_element(tag_name, namespace_uri, attrs)
-    }
-
-    fn detach_node(&self, node: &Self::ChildNode) {
-        detach_node(node);
-    }
-
-    fn get_attr_list(&self, element: &Self::Element) -> Vec<Attribute> {
-        get_attr_list(element)
-    }
-
-    fn get_child_nodes(&self, node: &Self::ParentNode) -> Vec<Self::ChildNode> {
-        get_child_nodes(node).expect("get_child_nodes target must be a parent node")
-    }
-
-    fn get_comment_node_content(&self, comment_node: &Self::CommentNode) -> String {
-        get_comment_node_content(comment_node)
-    }
-
-    fn get_document_mode(&self, document: &Self::Document) -> DocumentMode {
-        get_document_mode(document)
-    }
-
-    fn get_document_type_node_name(&self, doctype_node: &Self::DocumentType) -> String {
-        get_document_type_node_name(doctype_node)
-    }
-
-    fn get_document_type_node_public_id(&self, doctype_node: &Self::DocumentType) -> String {
-        get_document_type_node_public_id(doctype_node)
-    }
-
-    fn get_document_type_node_system_id(&self, doctype_node: &Self::DocumentType) -> String {
-        get_document_type_node_system_id(doctype_node)
-    }
-
-    fn get_first_child(&self, node: &Self::ParentNode) -> Option<Self::ChildNode> {
-        get_first_child(node)
-    }
-
-    fn get_namespace_uri(&self, element: &Self::Element) -> String {
-        get_namespace_uri(element)
-    }
-
-    fn get_node_source_code_location(&self, node: &Self::Node) -> Option<ElementLocation> {
-        get_node_source_code_location(node)
-    }
-
-    fn get_parent_node(&self, node: &Self::Node) -> Option<Self::ParentNode> {
-        get_parent_node(node)
-    }
-
-    fn get_tag_name(&self, element: &Self::Element) -> String {
-        get_tag_name(element)
-    }
-
-    fn get_text_node_content(&self, text_node: &Self::TextNode) -> String {
-        get_text_node_content(text_node)
-    }
-
-    fn get_template_content(
-        &self,
-        template_element: &Self::Template,
-    ) -> Option<Self::DocumentFragment> {
-        get_template_content(template_element)
-    }
-
-    fn insert_before(
-        &self,
-        parent_node: &Self::ParentNode,
-        new_node: Self::ChildNode,
-        reference_node: &Self::ChildNode,
-    ) {
-        insert_before(parent_node, new_node, reference_node);
-    }
-
-    fn insert_text(&self, parent_node: &Self::ParentNode, text: &str) {
-        insert_text(parent_node, text);
-    }
-
-    fn insert_text_before(
-        &self,
-        parent_node: &Self::ParentNode,
-        text: &str,
-        reference_node: &Self::ChildNode,
-    ) {
-        insert_text_before(parent_node, text, reference_node);
-    }
-
-    fn is_comment_node(&self, node: &Self::Node) -> bool {
-        node.borrow().is_comment()
-    }
-
-    fn is_document_type_node(&self, node: &Self::Node) -> bool {
-        node.borrow().is_document_type()
-    }
-
-    fn is_element_node(&self, node: &Self::Node) -> bool {
-        node.borrow().is_element()
-    }
-
-    fn is_text_node(&self, node: &Self::Node) -> bool {
-        node.borrow().is_text()
-    }
-
-    fn set_document_mode(&self, document: &Self::Document, mode: DocumentMode) {
-        set_document_mode(document, mode);
-    }
-
-    fn set_document_type(
-        &self,
-        document: &Self::Document,
-        name: &str,
-        public_id: &str,
-        system_id: &str,
-    ) {
-        set_document_type(document, name, public_id, system_id);
-    }
-
-    fn set_node_source_code_location(&self, node: &Self::Node, location: Option<ElementLocation>) {
-        set_node_source_code_location(node, location);
-    }
-
-    fn update_node_source_code_location(&self, node: &Self::Node, location: ElementLocation) {
-        update_node_source_code_location(node, location);
-    }
-
-    fn set_template_content(
-        &self,
-        template_element: &Self::Template,
-        content_element: Self::DocumentFragment,
-    ) {
-        set_template_content(template_element, content_element);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -751,11 +568,10 @@ mod tests {
         get_namespace_uri, get_node_source_code_location, get_parent_node, get_tag_name,
         get_template_content, get_text_node_content, insert_before, set_document_mode,
         set_document_type, set_node_source_code_location, set_template_content,
-        update_node_source_code_location, DEFAULT_TREE_ADAPTER,
+        update_node_source_code_location,
     };
     use crate::common::html::{DocumentMode, NS_HTML, NS_SVG};
     use crate::common::token::{Attribute, ElementLocation, Location};
-    use crate::tree_adapters::interface::TreeAdapter;
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
@@ -946,36 +762,5 @@ mod tests {
         assert!(location.attrs.contains_key("id"));
         assert!(location.start_tag.is_some());
         assert!(location.end_tag.is_some());
-    }
-
-    #[test]
-    fn default_tree_adapter_trait_delegates_to_default_operations() {
-        let adapter = DEFAULT_TREE_ADAPTER;
-        let document = adapter.create_document();
-        let element = adapter.create_element("div", NS_HTML, vec![Attribute::new("id", "x")]);
-        let text = adapter.create_text_node("hello");
-
-        adapter.append_child(&document, element.clone());
-        adapter.append_child(&element, text.clone());
-        adapter.set_document_type(&document, "html", "", "");
-
-        assert_eq!(adapter.get_document_mode(&document), DocumentMode::NoQuirks);
-        assert!(adapter.is_element_node(&element));
-        assert!(adapter.is_text_node(&text));
-        assert_eq!(adapter.get_tag_name(&element), "div");
-        assert_eq!(adapter.get_text_node_content(&text), "hello");
-        assert_eq!(
-            adapter.get_attr_list(&element),
-            vec![Attribute::new("id", "x")]
-        );
-        assert!(Rc::ptr_eq(
-            adapter.get_parent_node(&text).as_ref().unwrap(),
-            &element
-        ));
-
-        let first_child = adapter.get_first_child(&document).unwrap();
-        assert!(Rc::ptr_eq(&first_child, &element));
-        assert_eq!(adapter.get_child_nodes(&document).len(), 2);
-        assert!(adapter.is_document_type_node(&adapter.get_child_nodes(&document)[1]));
     }
 }
