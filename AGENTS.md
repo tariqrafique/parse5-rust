@@ -35,12 +35,12 @@ Rust/wasm port of parse5. Compatibility target is `parse5@8.0.1`, especially `pa
 
 | Rule | Enforced by |
 |---|---|
-| Default tests do not mention `reference/` | `scripts/check-no-reference.mjs` in `./scripts/check.sh`, `npm test`, and CI |
-| fmt and clippy are clean | `./scripts/check.sh` and `.github/workflows/ci.yml`; `[workspace.lints]` denies unused Rust lints and `clippy::all` |
+| Default tests do not mention `reference/` | `scripts/check-no-reference.mjs` in `./scripts/check.sh` and `npm test` |
+| fmt and clippy are clean | `./scripts/check.sh`; `[workspace.lints]` denies unused Rust lints and `clippy::all` |
 | Rust and JS tag, namespace, foreign-content, and error-code tables match | `cargo test --test js_table_parity` (`npm run test:tables-parity`) |
 | Rust and JS serializers agree on the serialization fixture | `npm run test:serializer-parity` |
 | `namedEntities.test` copies stay byte-identical | `npm run test:fixtures` |
 | Do not edit `reference/` | `.gitignore` (`reference/` is untracked) |
-| CI runs the same commands as local | `.github/workflows/ci.yml` calls `./scripts/check.sh` and `./scripts/check-wasm.sh` |
+| The same checks can be repeated in Actions | `.github/workflows/ci.yml` is `workflow_dispatch` only (no pull-request or push trigger) and calls `./scripts/check.sh` and `./scripts/check-wasm.sh` |
 
 Do not edit files under `reference/` unless explicitly asked. Normal tests use `fixtures/parse5/test/data`.

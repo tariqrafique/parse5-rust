@@ -1,14 +1,11 @@
 name: CI
+# Manual only. This repository does not have GitHub Actions credits, so pull
+# requests and pushes do not start runners. The local gate is ./scripts/check.sh
+# and ./scripts/check-wasm.sh. Run this workflow by hand when credits are available.
 # Hosted runners are pinned to ubuntu-24.04. ubuntu-latest is moving to 26.04 through November 2026.
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
 
 jobs:
   check:
