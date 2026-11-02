@@ -504,16 +504,36 @@ impl Tokenizer {
         self.leave_attr_value();
     }
 
+    /// Mirrors parse5's `_leaveAttrValue`: records the attribute's end
+    /// location at the current position and syncs the value.
+    ///
+    /// Only call this where upstream calls `_leaveAttrValue` (end of the
+    /// attribute name, and leaving a quoted/unquoted value on whitespace, `/`
+    /// or `>`). Calling it anywhere else moves the end of the span.
     fn leave_attr_value(&mut self) {
-        let Some(attr_name) = self.current_attr_committed_name.clone() else {
+        if self.current_attr_committed_name.is_none() {
             return;
-        };
+        }
 
         if let Some(attr_location) = &mut self.current_attr_location {
             attr_location.end_line = self.preprocessor.line;
             attr_location.end_col = self.preprocessor.col();
             attr_location.end_offset = self.preprocessor.offset();
         }
+
+        self.sync_committed_attr();
+    }
+
+    /// Copies the in-progress attribute value and location onto the token.
+    ///
+    /// Upstream pushes `currentAttr` and `currentLocation` into the token by
+    /// reference, so later value edits show up there with no extra step. This
+    /// port stores copies, so it syncs them here. Doing so never moves the
+    /// end of the span.
+    fn sync_committed_attr(&mut self) {
+        let Some(attr_name) = self.current_attr_committed_name.clone() else {
+            return;
+        };
 
         if let Some(CurrentToken::Tag(token)) = &mut self.current_token {
             let attr_exists = if let Some(attr) = token
@@ -551,7 +571,7 @@ impl Tokenizer {
     }
 
     fn emit_current_tag_token(&mut self) {
-        self.leave_attr_value();
+        self.sync_committed_attr();
         let Some(CurrentToken::Tag(mut token)) = self.current_token.take() else {
             return;
         };
@@ -1762,7 +1782,9 @@ impl Tokenizer {
             }
             _ => {
                 self.err(ErrorCode::MissingWhitespaceBetweenAttributes);
-                self.leave_attr_value();
+                // Upstream does not call `_leaveAttrValue` here, so the span
+                // keeps the end recorded when the attribute name ended.
+                self.sync_committed_attr();
                 self.state = State::BeforeAttributeName;
                 self.state_before_attribute_name(code_point);
             }
