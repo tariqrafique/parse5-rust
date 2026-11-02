@@ -36,11 +36,8 @@ struct ExpectedError {
     col: usize,
 }
 
-#[test]
-fn html5lib_tokenizer_test1_fixture_matches_upstream() {
-    run_tokenizer_fixture(&tokenizer_fixture_dir().join("test1.test"));
-}
-
+/// `HTML5LIB_FILTER=test1.test` or `HTML5LIB_FILTER=test1.test:3` runs one file
+/// or one case. The index is the 0-based test object in that file.
 #[test]
 fn html5lib_tokenizer_fixtures_match_upstream() {
     let mut fixtures = fs::read_dir(tokenizer_fixture_dir())
@@ -51,17 +48,115 @@ fn html5lib_tokenizer_fixtures_match_upstream() {
 
     fixtures.sort();
 
+    let filter = html5lib_filter();
+    let mut failures = Vec::new();
+    let mut ran = 0usize;
+    let mut saw_file = false;
+
     for fixture in fixtures {
-        run_tokenizer_fixture(&fixture);
+        let fixture_name = fixture
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("fixture has a UTF-8 file name");
+        if !filter.allows_file(fixture_name) {
+            continue;
+        }
+        saw_file = true;
+        let (case_count, case_failures) = collect_tokenizer_failures(&fixture, &filter);
+        ran += case_count;
+        failures.extend(case_failures);
+    }
+
+    if ran == 0 {
+        if filter.file.is_some() && !saw_file {
+            return;
+        }
+        panic!(
+            "HTML5LIB_FILTER={:?} matched no tokenizer cases",
+            std::env::var("HTML5LIB_FILTER").ok()
+        );
+    }
+    report_failures(ran, &failures);
+}
+
+struct CaseFailure {
+    label: String,
+    detail: String,
+}
+
+struct Html5libFilter {
+    file: Option<String>,
+    index: Option<usize>,
+}
+
+impl Html5libFilter {
+    fn allows_file(&self, file: &str) -> bool {
+        self.file.as_deref().is_none_or(|expected| expected == file)
+    }
+
+    fn allows_index(&self, index: usize) -> bool {
+        self.index.is_none_or(|expected| expected == index)
     }
 }
 
-fn run_tokenizer_fixture(path: &Path) {
+fn html5lib_filter() -> Html5libFilter {
+    let Ok(raw) = std::env::var("HTML5LIB_FILTER") else {
+        return Html5libFilter {
+            file: None,
+            index: None,
+        };
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Html5libFilter {
+            file: None,
+            index: None,
+        };
+    }
+    match raw.split_once(':') {
+        Some((file, index)) => Html5libFilter {
+            file: Some(file.to_string()),
+            index: Some(
+                index
+                    .parse()
+                    .unwrap_or_else(|_| panic!("HTML5LIB_FILTER index is not a number: {raw}")),
+            ),
+        },
+        None => Html5libFilter {
+            file: Some(raw.to_string()),
+            index: None,
+        },
+    }
+}
+
+fn report_failures(ran: usize, failures: &[CaseFailure]) {
+    if failures.is_empty() {
+        return;
+    }
+    let mut message = format!("{}/{} tokenizer cases failed:\n", failures.len(), ran);
+    for failure in failures {
+        message.push_str(&format!("  {}\n", failure.label));
+    }
+    message.push('\n');
+    for failure in failures.iter().take(5) {
+        message.push_str(&failure.detail);
+        message.push('\n');
+    }
+    if failures.len() > 5 {
+        message.push_str(&format!(
+            "... {} more mismatches omitted\n",
+            failures.len() - 5
+        ));
+    }
+    panic!("{message}");
+}
+
+fn collect_tokenizer_failures(path: &Path, filter: &Html5libFilter) -> (usize, Vec<CaseFailure>) {
     let fixture = fs::read_to_string(path).expect("tokenizer fixture is readable");
     let fixture_json: Value =
         serde_json::from_str(&fixture).expect("tokenizer fixture is valid JSON");
     if fixture_json.get("tests").is_none() {
-        return;
+        return (0, Vec::new());
     }
     let test_set: TestSet =
         serde_json::from_value(fixture_json).expect("tokenizer fixture has valid tests");
@@ -69,8 +164,14 @@ fn run_tokenizer_fixture(path: &Path) {
         .file_name()
         .and_then(|name| name.to_str())
         .expect("fixture has a UTF-8 file name");
+    let mut failures = Vec::new();
+    let mut ran = 0usize;
 
-    for mut test_case in test_set.tests {
+    for (idx, mut test_case) in test_set.tests.into_iter().enumerate() {
+        if !filter.allows_index(idx) {
+            continue;
+        }
+        ran += 1;
         if test_case.double_escaped {
             unescape_double_escaped_io(&mut test_case);
         }
@@ -125,18 +226,31 @@ fn run_tokenizer_fixture(path: &Path) {
             sort_errors(&mut actual_errors);
             sort_errors(&mut expected_errors);
 
-            assert_eq!(
-                actual_tokens, test_case.output,
-                "{fixture_name}: {} ({initial_state})",
+            let label = format!(
+                "{fixture_name}#{idx} {} ({initial_state})",
                 test_case.description
             );
-            assert_eq!(
-                actual_errors, expected_errors,
-                "{fixture_name}: {} ({initial_state})",
-                test_case.description
-            );
+            if actual_tokens != test_case.output {
+                failures.push(CaseFailure {
+                    label: format!("{label} tokens"),
+                    detail: format!(
+                        "{label} tokens\nexpected: {:?}\nactual:   {actual_tokens:?}\n",
+                        test_case.output
+                    ),
+                });
+            }
+            if actual_errors != expected_errors {
+                failures.push(CaseFailure {
+                    label: format!("{label} errors"),
+                    detail: format!(
+                        "{label} errors\nexpected: {expected_errors:?}\nactual:   {actual_errors:?}\n"
+                    ),
+                });
+            }
         }
     }
+
+    (ran, failures)
 }
 
 fn tokenizer_fixture_dir() -> PathBuf {
