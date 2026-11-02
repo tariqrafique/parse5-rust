@@ -9,6 +9,7 @@ repository.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+console_error_panic_hook = "0.1.7"
 js-sys.workspace = true
 parse5.workspace = true
 serde.workspace = true

@@ -22,7 +22,7 @@ Rust/wasm port of parse5. Compatibility target is `parse5@8.0.1`, especially `pa
 - Upstream file map: the table in `docs/architecture.md`. Insertion modes live under `crates/parse5/src/parser/modes/` and tokenizer states under `crates/parse5/src/tokenizer/states/`.
 - Do not read or grep `fixtures/` wholesale. It is about 7.8 MB. `namedEntities.test` is 1.1 MB and vendored twice (the copies are byte-identical; `npm run test:fixtures` checks that). Use `rg -g '!fixtures'`.
 - Offsets are UTF-16 code units everywhere (errors and `sourceCodeLocation`).
-- The parser does not use the `TreeAdapter` trait. Call the free functions in `tree_adapters::default`.
+- There is no `TreeAdapter` trait. Call the free functions in `tree_adapters::default`.
 - Tag, namespace, foreign-content, and error-code tables exist in both `crates/parse5/src/common/*.rs` and `packages/parse5-wasm/src/index.js`. Change both. `cargo test --test js_table_parity` fails if they diverge.
 - The Rust serializer (`crates/parse5/src/serializer`) and the JS serializer (`packages/parse5-wasm/src/index.js`) are both checked against `fixtures/parse5/test/data/serialization/tests.json` by `npm run test:serializer-parity`.
 

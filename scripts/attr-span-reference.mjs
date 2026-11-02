@@ -10,14 +10,20 @@
 //   node scripts/attr-span-reference.mjs --rust     # Rust table for the test
 //   PARSE5_PATH=/path/to/parse5 node scripts/attr-span-reference.mjs
 //
-// Default parse5 location:
-//   /workspace/lwc/packages/@lwc/template-compiler/node_modules/parse5 (8.0.1)
+// Default parse5 location: reference/parse5/packages/parse5 after
+// `npm run setup:reference`. Override with PARSE5_PATH.
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import path from 'node:path';
 
-const parse5Dir =
-    process.env.PARSE5_PATH ??
-    '/workspace/lwc/packages/@lwc/template-compiler/node_modules/parse5';
+const root = path.resolve(import.meta.dirname, '..');
+const parse5Dir = process.env.PARSE5_PATH ?? path.join(root, 'reference/parse5/packages/parse5');
+
+if (!fs.existsSync(path.join(parse5Dir, 'package.json'))) {
+    console.error(`parse5 was not found at ${parse5Dir}`);
+    console.error('Run `npm run setup:reference` or set PARSE5_PATH to a parse5 package directory.');
+    process.exit(1);
+}
 const require = createRequire(import.meta.url);
 const pkg = require(path.join(parse5Dir, 'package.json'));
 const parse5 = await import(path.join(parse5Dir, 'dist/index.js'));
