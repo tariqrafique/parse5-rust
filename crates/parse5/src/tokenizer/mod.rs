@@ -412,6 +412,10 @@ impl Tokenizer {
     }
 
     pub(in crate::tokenizer) fn err_with_offset(&mut self, code: ErrorCode, cp_offset: isize) {
+        // parse5 reports preprocessor errors synchronously from `advance()`, so any
+        // buffered ones happened before this tokenizer error. Drain them first to keep
+        // the combined list in occurrence order.
+        self.errors.extend(self.preprocessor.take_errors());
         self.errors
             .push(self.preprocessor.get_error(code, cp_offset));
     }

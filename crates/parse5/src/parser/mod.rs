@@ -484,6 +484,10 @@ impl Parser {
             location.end_offset = location.start_offset;
         }
 
+        // parse5 reports tokenizer errors synchronously while the token is produced,
+        // which is before the parser sees that token. Drain the buffered tokenizer (and
+        // preprocessor) errors first so the list stays in occurrence order.
+        self.errors.extend(self.tokenizer.take_errors());
         self.errors.push(ParserError { code, location });
     }
 

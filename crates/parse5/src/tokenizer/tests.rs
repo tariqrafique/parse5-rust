@@ -86,6 +86,107 @@ fn numeric_character_reference_errors_match_parse5_order() {
     assert_eq!(get_error_for_numeric_character_reference('A' as u32), None);
 }
 
+/// Ordered `(code, start_line, start_col, start_offset, end_line, end_col, end_offset)`
+/// lists recorded from JS parse5 8.0.1 `parseFragment(html, { sourceCodeLocationInfo:
+/// true, onParseError })`. parse5 reports preprocessor, tokenizer and tree-construction
+/// errors to one callback in occurrence order, so mixed documents must interleave them.
+#[test]
+fn mixed_parse_errors_match_parse5_occurrence_order() {
+    type Expected = (&'static str, usize, usize, usize, usize, usize, usize);
+    let trimmed_custom_header_cpe = concat!(
+        "<template>\n",
+        "    <lightning-radio-group class='displayModeClass' name=\"select_displayMode\" label={inputValues.displayMode.label}\n",
+        "        options={displayChoicesAsOptions} value={inputValues.displayMode.value} type=\"radio\"\n",
+        "        onchange={handleValueChange}\n",
+        "    </lightning-radio-group>\n",
+        "\n",
+        "    <lightning-input type=\"number\" label={inputValues.orderNumber.label} name=\"select_orderNumber\"\n",
+        "        value={inputValues.orderNumber.value} onchange={handleValueChange}></lightning-input>\n",
+        "</template>\n",
+    );
+    let cases: [(&str, &str, &[Expected]); 3] = [
+        (
+            "unclosed start tag before its end tag (tokenizer then tree)",
+            "<template><div a={b}\n</div></template>",
+            &[
+                ("unexpected-character-in-attribute-name", 2, 1, 21, 2, 1, 21),
+                ("unexpected-solidus-in-tag", 2, 3, 23, 2, 3, 23),
+                (
+                    "closing-of-element-with-open-child-elements",
+                    2,
+                    7,
+                    27,
+                    2,
+                    18,
+                    38,
+                ),
+            ],
+        ),
+        (
+            "control character inside attribute name (preprocessor then tokenizer)",
+            "<template><div x\u{0001}\"y></div></template>",
+            &[
+                ("control-character-in-input-stream", 1, 17, 16, 1, 17, 16),
+                (
+                    "unexpected-character-in-attribute-name",
+                    1,
+                    18,
+                    17,
+                    1,
+                    18,
+                    17,
+                ),
+            ],
+        ),
+        (
+            "trimmed LightningFlowComponents customHeaderCpe.html",
+            trimmed_custom_header_cpe,
+            &[
+                (
+                    "unexpected-character-in-attribute-name",
+                    5,
+                    5,
+                    261,
+                    5,
+                    5,
+                    261,
+                ),
+                ("unexpected-solidus-in-tag", 5, 7, 263, 5, 7, 263),
+                (
+                    "closing-of-element-with-open-child-elements",
+                    9,
+                    1,
+                    480,
+                    9,
+                    12,
+                    491,
+                ),
+            ],
+        ),
+    ];
+
+    for (name, html, expected) in cases {
+        let output = crate::parse_fragment_with_errors(html, crate::ParserOptions::default());
+        let actual: Vec<Expected> = output
+            .errors
+            .iter()
+            .map(|err| {
+                let l = &err.location;
+                (
+                    err.code.as_str(),
+                    l.start_line,
+                    l.start_col,
+                    l.start_offset,
+                    l.end_line,
+                    l.end_col,
+                    l.end_offset,
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected, "{name}");
+    }
+}
+
 #[test]
 fn tokenizer_groups_character_tokens_and_emits_eof() {
     let output = Tokenizer::tokenize("hi \n\u{0}x", TokenizerOptions::default());
